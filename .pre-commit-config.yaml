@@ -1,0 +1,22 @@
+repos:
+  - repo: https://github.com/golang/gofmt
+    rev: v0.0.0-20250514184215-d19a5c284e29
+    hooks:
+      - id: gofmt
+        args: [-l, -w]
+
+  - repo: local
+    hooks:
+      - id: go-vet
+        name: go vet
+        entry: bash -c 'go -C app vet ./...'
+        language: system
+        pass_filenames: false
+        types: [go]
+
+      - id: go-test
+        name: go test
+        entry: bash -c 'go -C app test ./...'
+        language: system
+        pass_filenames: false
+        types: [go]

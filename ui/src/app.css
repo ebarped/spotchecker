@@ -1,0 +1,419 @@
+@import 'tailwindcss';
+
+/* Dark canvas is the default; `dark:` utilities follow <html data-theme>. */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
+@theme {
+	--font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+	--font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+
+	/* Status palette — the same meaning everywhere (badges, charts, dots).
+	   Warm accents tuned to read on the solid card surfaces of both themes. */
+	--color-ok: #73c68a;
+	--color-empty: #7fa8db;
+	--color-error: #e58f8a;
+	--color-skipped: #8b919c;
+	--color-partial: #f0b64e;
+	--color-ko: #e8705e;
+
+	/* Semantic surfaces, redefined per theme below. */
+	--color-bg: var(--gd-bg);
+	--color-surface: var(--gd-surface);
+	--color-surface-2: var(--gd-surface-2);
+	--color-line: var(--gd-line);
+	--color-line-strong: var(--gd-line-strong);
+	--color-ink: var(--gd-ink);
+	--color-muted: var(--gd-muted);
+	--color-faint: var(--gd-faint);
+	--color-accent: var(--gd-accent);
+	--color-accent-2: var(--gd-accent-2);
+	--color-accent-3: var(--gd-accent-3);
+	--color-overlay: var(--gd-overlay);
+}
+
+/* ------------------------------------------------------------------ themes */
+
+:root,
+:root[data-theme='dark'] {
+	color-scheme: dark;
+
+	/* Grafana-dark canvas with solid one-step-lighter cards. */
+	--gd-bg: #131418;
+	--gd-surface: #1b1d23;
+	--gd-surface-2: #22252c;
+	--gd-line: rgb(255 255 255 / 0.08);
+	--gd-line-strong: rgb(255 255 255 / 0.16);
+	--gd-ink: #f2f2f0;
+	--gd-muted: #a9aeb8;
+	--gd-faint: #7d828c;
+	--gd-accent: #4ea8dc;
+	--gd-accent-2: #e8875e;
+	--gd-accent-3: #e6bc6a;
+	--gd-overlay: #22252c;
+
+	/* Faint warm embers keep the flat canvas from feeling dead. */
+	--blob-opacity: 0.18;
+	--blob-blur: 110px;
+	--blob-a: #3a6ea5;
+	--blob-b: #b85c38;
+	--blob-c: #8a6428;
+	--blob-d: #e8875e;
+	--glass-shadow:
+		0 1px 0 0 rgb(255 255 255 / 0.03) inset, 0 12px 32px -16px rgb(0 0 0 / 0.55);
+}
+
+:root[data-theme='light'] {
+	color-scheme: light;
+
+	/* Warm paper canvas with solid white cards. */
+	--gd-bg: #f4f1ea;
+	--gd-surface: #ffffff;
+	--gd-surface-2: #faf7f1;
+	--gd-line: rgb(27 29 35 / 0.1);
+	--gd-line-strong: rgb(27 29 35 / 0.2);
+	--gd-ink: #2a2622;
+	--gd-muted: #6b675f;
+	--gd-faint: #98938a;
+	--gd-accent: #2a6e9e;
+	--gd-accent-2: #b85c38;
+	--gd-accent-3: #8a6428;
+	--gd-overlay: #ffffff;
+
+	/* Aurora washed into pastel morning light. */
+	--blob-opacity: 0.35;
+	--blob-blur: 110px;
+	--blob-a: #a9c4e4;
+	--blob-b: #efc3a8;
+	--blob-c: #e6d5b0;
+	--blob-d: #f2c4ae;
+	--glass-shadow: 0 1px 2px rgb(27 29 35 / 0.06), 0 12px 28px -18px rgb(27 29 35 / 0.35);
+}
+
+/* --------------------------------------------------------------- base layer */
+
+@layer base {
+	html {
+		scroll-behavior: smooth;
+	}
+
+	body {
+		background: var(--gd-bg);
+		color: var(--gd-ink);
+		font-family: var(--font-sans);
+		-webkit-font-smoothing: antialiased;
+		text-rendering: optimizeLegibility;
+	}
+
+	::selection {
+		background: color-mix(in oklab, var(--gd-accent) 35%, transparent);
+	}
+
+	*:focus-visible {
+		outline: 2px solid color-mix(in oklab, var(--gd-accent) 70%, transparent);
+		outline-offset: 2px;
+	}
+
+	/* Tailwind 4's preflight resets buttons to cursor: default; every button
+	   is clickable, so restore the hand globally. */
+	button:not(:disabled),
+	[role='button']:not(:disabled) {
+		cursor: pointer;
+	}
+
+	/* Slim scrollbars that match the theme. */
+	* {
+		scrollbar-width: thin;
+		scrollbar-color: var(--gd-line-strong) transparent;
+	}
+}
+
+/* ------------------------------------------------------------ card surfaces */
+
+@layer components {
+	/* Solid card, one step lighter than the canvas (no glass blur). */
+	.glass {
+		background: var(--gd-surface);
+		border: 1px solid var(--gd-line);
+		box-shadow: var(--glass-shadow);
+	}
+
+	.glass-hover {
+		transition:
+			border-color 0.18s ease,
+			background-color 0.18s ease;
+	}
+
+	.glass-hover:hover {
+		border-color: var(--gd-line-strong);
+		background: var(--gd-surface-2);
+	}
+
+	/* Metric tile: solid warm fill with a darker bottom edge, white ink. */
+	.tile {
+		background: linear-gradient(
+			135deg,
+			var(--tile) 0%,
+			color-mix(in oklab, var(--tile) 82%, #000) 100%
+		);
+		border: 1px solid rgb(255 255 255 / 0.1);
+		box-shadow:
+			inset 0 1px 0 rgb(255 255 255 / 0.12),
+			0 10px 24px -14px color-mix(in oklab, var(--tile) 70%, #000);
+	}
+
+	/* On the light canvas the colored shadow reads as a smudge and the white
+	   border as a halo — anchor the tile with a neutral edge and softer lift. */
+	:root[data-theme='light'] .tile {
+		border-color: rgb(27 29 35 / 0.1);
+		box-shadow:
+			inset 0 1px 0 rgb(255 255 255 / 0.2),
+			0 1px 2px rgb(27 29 35 / 0.08),
+			0 16px 32px -20px color-mix(in oklab, var(--tile) 60%, #000);
+	}
+
+	/* Gradient text for the product name and hero numbers. */
+	.aurora-text {
+		background: linear-gradient(
+			100deg,
+			var(--gd-accent) 0%,
+			var(--gd-accent-2) 45%,
+			var(--gd-accent-3) 100%
+		);
+		background-clip: text;
+		color: transparent;
+	}
+
+	/* Small uppercase section caption (sidebar groups, KPI labels). */
+	.caption {
+		font-size: 11px;
+		font-weight: 600;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		color: var(--gd-faint);
+	}
+
+	/* Markdown body of the agent answers. */
+	.markdown {
+		font-size: 0.875rem;
+		line-height: 1.6;
+	}
+
+	.markdown > :first-child {
+		margin-top: 0;
+	}
+
+	.markdown p {
+		margin: 0.5rem 0;
+	}
+
+	.markdown h1,
+	.markdown h2,
+	.markdown h3,
+	.markdown h4 {
+		margin: 1rem 0 0.4rem;
+		font-weight: 600;
+		line-height: 1.3;
+	}
+
+	.markdown ul {
+		margin: 0.5rem 0;
+		list-style: disc;
+		padding-left: 1.25rem;
+	}
+
+	.markdown ol {
+		margin: 0.5rem 0;
+		list-style: decimal;
+		padding-left: 1.25rem;
+	}
+
+	.markdown code {
+		font-family: var(--font-mono);
+		font-size: 0.75rem;
+		background: var(--gd-surface-2);
+		border: 1px solid var(--gd-line);
+		border-radius: 0.375rem;
+		padding: 0.1rem 0.35rem;
+	}
+
+	.markdown pre {
+		margin: 0.6rem 0;
+		overflow-x: auto;
+		border: 1px solid var(--gd-line);
+		background: var(--gd-surface-2);
+		border-radius: 0.75rem;
+		padding: 0.75rem 1rem;
+	}
+
+	.markdown pre code {
+		background: transparent;
+		border: 0;
+		padding: 0;
+	}
+
+	.markdown a {
+		color: var(--gd-accent);
+		text-decoration: underline;
+		text-underline-offset: 2px;
+	}
+
+	.markdown img {
+		max-width: 100%;
+		border: 1px solid var(--gd-line);
+		border-radius: 0.75rem;
+	}
+
+	.markdown blockquote {
+		margin: 0.5rem 0;
+		padding-left: 0.75rem;
+		border-left: 2px solid var(--gd-line-strong);
+		color: var(--gd-muted);
+	}
+}
+
+/* ------------------------------------------------------------ aurora backdrop */
+
+.aurora {
+	position: fixed;
+	inset: 0;
+	z-index: -10;
+	overflow: hidden;
+	pointer-events: none;
+}
+
+.aurora-blob {
+	position: absolute;
+	border-radius: 9999px;
+	filter: blur(var(--blob-blur));
+	opacity: var(--blob-opacity);
+	will-change: transform;
+}
+
+.aurora-a {
+	width: 55vw;
+	height: 42vh;
+	top: -12vh;
+	left: -8vw;
+	background: radial-gradient(closest-side, var(--blob-a), transparent 72%);
+	animation: aurora-drift-a 26s ease-in-out infinite alternate;
+}
+
+.aurora-b {
+	width: 48vw;
+	height: 46vh;
+	top: -8vh;
+	right: -10vw;
+	background: radial-gradient(closest-side, var(--blob-b), transparent 72%);
+	animation: aurora-drift-b 32s ease-in-out infinite alternate;
+}
+
+.aurora-c {
+	width: 60vw;
+	height: 40vh;
+	bottom: -18vh;
+	left: 18vw;
+	background: radial-gradient(closest-side, var(--blob-c), transparent 72%);
+	animation: aurora-drift-c 38s ease-in-out infinite alternate;
+}
+
+.aurora-d {
+	width: 30vw;
+	height: 30vh;
+	top: 34vh;
+	right: 8vw;
+	background: radial-gradient(closest-side, var(--blob-d), transparent 72%);
+	animation: aurora-drift-a 30s ease-in-out infinite alternate-reverse;
+}
+
+/* Faint grain keeps the gradients from banding. */
+.aurora::after {
+	content: '';
+	position: absolute;
+	inset: 0;
+	opacity: 0.05;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+@keyframes aurora-drift-a {
+	from {
+		transform: translate3d(0, 0, 0) scale(1);
+	}
+	to {
+		transform: translate3d(6vw, 5vh, 0) scale(1.15);
+	}
+}
+
+@keyframes aurora-drift-b {
+	from {
+		transform: translate3d(0, 0, 0) scale(1.1);
+	}
+	to {
+		transform: translate3d(-7vw, 6vh, 0) scale(0.95);
+	}
+}
+
+@keyframes aurora-drift-c {
+	from {
+		transform: translate3d(0, 0, 0) scale(0.95);
+	}
+	to {
+		transform: translate3d(5vw, -6vh, 0) scale(1.2);
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.aurora-blob {
+		animation: none;
+	}
+}
+
+/* ---------------------------------------------------------------- utilities */
+
+@utility mono {
+	font-family: var(--font-mono);
+	font-variant-ligatures: none;
+}
+
+/* Soft top/bottom fade for scrollable regions. */
+.fade-y {
+	-webkit-mask-image: linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%);
+	mask-image: linear-gradient(to bottom, transparent 0, black 14px, black calc(100% - 14px), transparent 100%);
+}
+
+/* ------------------------------------------------ Svelte Flow (agent path) */
+
+/* The glass card is the pane: no library background. */
+.svelte-flow,
+.svelte-flow__pane {
+	background: transparent;
+}
+
+/* Handles are geometry only — edges connect through them. */
+.svelte-flow__handle {
+	opacity: 0;
+	width: 4px;
+	height: 4px;
+	border: none;
+	pointer-events: none;
+}
+
+/* Controls restyled with the warm tokens (zoom in/out/fit). */
+.svelte-flow {
+	--xy-controls-button-background-color: var(--gd-surface-2);
+	--xy-controls-button-background-color-hover: var(--gd-surface-2);
+	--xy-controls-button-color: var(--gd-ink);
+	--xy-controls-button-color-hover: var(--gd-ink);
+	--xy-controls-button-border-color: var(--gd-line);
+	--xy-controls-button-box-shadow: none;
+	--xy-attribution-background-color: transparent;
+}
+
+.svelte-flow__attribution {
+	background: transparent;
+	color: var(--gd-faint);
+	font-size: 9px;
+}
+
+.svelte-flow__attribution a {
+	color: var(--gd-faint);
+}

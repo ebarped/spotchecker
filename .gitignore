@@ -1,0 +1,32 @@
+# Local configuration (may contain service credentials).
+config.yaml
+config.local.yaml
+config.turislab.yaml
+app/config.turislab.yaml
+
+# Generated reports.
+report.json
+*.report.json
+
+# Local PoC database.
+turislab.db
+turislab.db-shm
+turislab.db-wal
+*.db
+*.db-shm
+*.db-wal
+
+# Binaries.
+grafana-doctor
+turislab
+/bin/
+
+# Web UI build output: the SvelteKit app in ui/ compiles straight into the
+# Go module's embed folder. Only the tracked placeholder is kept on disk
+# between builds.
+app/ui/build/*
+!app/ui/build/placeholder.html
+
+# Editor / OS noise.
+.DS_Store
+*.swp

@@ -1,0 +1,255 @@
+# =============================================================================
+# TurisLab Doctor — configuración de ejemplo (PoC)
+# =============================================================================
+# Copia este fichero a config.yaml (o config.turislab.yaml) y ajústalo.
+#
+# Precedencia: flags > secretos de entorno > este fichero > defaults.
+# Los secretos NUNCA se escriben aquí: usa api_key_env / *_env con el NOMBRE
+# de la variable de entorno que contiene la clave.
+#
+# Etiquetas usadas en los comentarios:
+#   [PoC]   valor pensado para la prueba de concepto.
+#   [Prod]  valor o cambio recomendado al pasar a producción.
+#   Opciones: valores admitidos por el campo.
+#
+# Las rutas que empiezan por "./" o "../" se resuelven contra el directorio de
+# este fichero, no contra el directorio desde el que se lanza el binario. Los
+# nombres sin "./" (p. ej. "google-maps-scraper") se buscan en PATH.
+#
+# El paso de PoC a producto se detalla en PLAN-IMPLEMENTACION.md §18.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Persistencia
+# -----------------------------------------------------------------------------
+database:
+  driver: sqlite                  # [PoC] sqlite. Opciones: sqlite | postgres. [Prod] postgres para concurrencia, backups y réplicas.
+  dsn: ./turislab.db              # [PoC] ruta local. [Prod] "postgres://user:pass@host:5432/turislab?sslmode=require".
+  max_open_conns: 5               # Conexiones abiertas. Opciones: 1-100. [Prod] 20-50 según carga; 0 = sin límite (no recomendado).
+  busy_timeout: 5s                # Solo SQLite: espera si la BD está bloqueada. Opciones: "0s" (sin espera) o "1s"-"30s".
+  auto_migrate: true              # true = crea/actualiza tablas al arrancar. Opciones: true | false. [Prod] false: migraciones explícitas y versionadas.
+
+# -----------------------------------------------------------------------------
+# Entrada de datos
+# -----------------------------------------------------------------------------
+input:
+  path: ./base-de-datos.json      # [PoC] los 10 establecimientos. [Prod] export oficial o tabla del registro turístico.
+  format: json                    # Formato del fichero. Opciones: json | csv | ndjson. [Prod] el que exporte el organismo.
+  ground_truth_path: ./ground-truth.json  # [PoC] verdad terreno para validar. [Prod] "" o null: no se usa para puntuar.
+  default_country: ""             # [PoC] "" = no asumir país. [Prod] "ES" u otro ISO-3166 alpha-2.
+  reload_interval: 0s             # Cada cuánto se relee el fichero. Opciones: "0s" (solo al arrancar) o "1h", "24h". [Prod] "24h" si cambia.
+  strict_validation: true         # true = rechaza registros inválidos. Opciones: true | false. [Prod] true con informe de descartes.
+
+# -----------------------------------------------------------------------------
+# Planificador del scan
+# -----------------------------------------------------------------------------
+scan:
+  mode: sequential                # [PoC] sequential = un establecimiento por tick. Opciones: sequential | parallel. [Prod] parallel con límites por fuente.
+  trigger_interval: 1m            # [PoC] 1m para no saturar APIs públicas. Opciones: "30s", "1m", "5m", "1h". [Prod] 5-15m o cron diario según volumen.
+  targets_per_tick: 1             # [PoC] 1 establecimiento. Opciones: 1-100. [Prod] 10-50 solo si las fuentes lo permiten.
+  jitter: 0.1                     # Variación aleatoria para no ir en cadencia perfecta. Opciones: 0.0-0.5. [Prod] 0.1-0.2.
+  max_concurrent_sources: 2       # Fuentes en paralelo por establecimiento. Opciones: 1-10. [Prod] 4-8 con rate limiter por fuente.
+  backoff_on_429: 10m             # Pausa tras un rate limit. Opciones: "0s" (desactivado) o "1m"-"1h". [Prod] 10m-30m.
+  max_attempts: 3                 # Reintentos por fuente. Opciones: 1-5. [Prod] 3 con backoff exponencial.
+  stale_after_days: 7             # Días tras los que un dato se considera viejo. Opciones: 1-365. [Prod] 30-90 según categoría y estacionalidad.
+  max_signals_per_establishment: 40  # Tope de señales por ficha para evitar ruido. Opciones: 10-100.
+  budget_eur_per_scan: 0          # [PoC] 0 = solo fuentes gratuitas. Opciones: 0-1000. [Prod] 25-100 con alertas.
+  cycle_pause: 0s                 # Pausa entre ciclos completos. Opciones: "0s" o "1m"-"24h".
+  skip_on_holiday: false          # true = no escanear festivos locales. Opciones: true | false. Requiere calendario configurado.
+
+# -----------------------------------------------------------------------------
+# Fuentes de evidencia
+# -----------------------------------------------------------------------------
+sources:
+  # --- Google Maps por scraping (sin API de pago) ---------------------------
+  # Instala el binario con `make turislab-scraper` (MIT, ~70 MB, gitignoreado).
+  # Su primer arranque descarga además el Chromium de Playwright (~115 MB).
+  # Google limita las consultas: espaciarlas ~1 min (ver scan.trigger_interval).
+  google_maps_scraper:
+    enabled: true                 # [PoC] true. Opciones: true | false. [Prod] false: sustituir por Google Places API (§18.3).
+    provider: gosom               # Scraper a usar. Opciones: gosom | kit. gosom expone status; kit aporta rating/reviews y "abierto ahora".
+    binary: ./bin/google-maps-scraper  # Ruta al binario/script. Opciones: ruta relativa, absoluta o "" para buscar en PATH.
+    timeout_seconds: 90           # Tiempo máximo por consulta. Opciones: 30-180. [Prod] 60.
+    max_places: 3                 # Resultados por consulta para desambiguar (se aplica al parsear; gosom no tiene flag de límite). Opciones: 1-10. [Prod] 3-5.
+    depth: 1                      # Profundidad de resultados. Opciones: 1-5. 1 = solo la ficha; más = más lento y ruidoso.
+    language: es                  # Idioma de la consulta. Opciones: ISO-639-1: es | en | ca | gl | eu. OJO: el enum de cierre viene localizado ("CERRADO" con es, "CLOSED" con en); el parser acepta ambos.
+    cache_ttl_days: 7             # Días de caché por place_id. Opciones: 1-30. [Prod] 7-14 para no scrapear de más.
+    include_reviews: false        # false = solo estado/rating. Opciones: true | false. true = más datos y más riesgo legal.
+    proxy_url_env: GMAPS_PROXY_URL  # Nombre de la env var con el proxy. Opciones: "" (sin proxy) o nombre de variable.
+    fallback_provider: kit        # Scraper de respaldo. Opciones: kit | "" (sin fallback).
+    headless: true                # true = sin ventana. Opciones: true | false. false solo para depurar.
+
+  # --- Google Places API (oficial, requiere clave y facturación) ------------
+  google_places:
+    enabled: false                # [PoC] false. Opciones: true | false. [Prod] true con GOOGLE_PLACES_API_KEY.
+    api_key_env: GOOGLE_PLACES_API_KEY  # NOMBRE de la env var con la clave. Opciones: cualquier nombre válido; nunca la clave literal.
+    language: es                  # Idioma de la respuesta. Opciones: ISO-639-1: es | en | ca | gl | eu.
+    region: ""                    # Sesgo regional. Opciones: "" (sin sesgo) o ISO-3166 alpha-2: ES | FR | PT.
+    details_ttl_days: 7           # Días de caché de Place Details. Opciones: 1-30.
+    include_reviews: true         # true = incluye hasta 5 reseñas. Opciones: true | false. Aumenta el coste (Enterprise + Atmosphere).
+    timeout_seconds: 10           # Tiempo máximo por petición. Opciones: 5-30.
+    max_requests_per_minute: 60   # Límite local de peticiones. Opciones: 0 (sin límite) o 1-600. [Prod] ajustar a la cuota contratada.
+    field_mask: "places.id,places.businessStatus,places.displayName,places.rating,places.userRatingCount,places.websiteUri,places.nationalPhoneNumber"  # Solo campos necesarios = menos coste. Opciones: cualquier field mask válido de Places API (New).
+
+  # --- OpenStreetMap / Overpass ---------------------------------------------
+  osm:
+    enabled: true                 # [PoC] true. Opciones: true | false. [Prod] true como contraste barato.
+    overpass_url: https://overpass-api.de/api/interpreter  # Endpoint Overpass. Opciones: instancia pública o propia. [Prod] instancia propia para no abusar.
+    timeout_seconds: 30           # Tiempo máximo por consulta. Opciones: 10-60.
+    cache_ttl_days: 30            # Días de caché. Opciones: 7-90.
+    max_elements: 5               # Elementos máximos a devolver. Opciones: 1-20.
+    user_agent: "TurisLabDoctor/0.1 (+https://example.org/bot)"  # Identificación y contacto. Opciones: cadena con URL de contacto.
+
+  # --- Overture Maps ---------------------------------------------------------
+  overture:
+    enabled: true                 # [PoC] true. Opciones: true | false. [Prod] true si se descarga el release.
+    release: "2026-10-01"         # Release del dataset. Opciones: "YYYY-MM-DD" o "" (último disponible).
+    local_path: ./data/overture   # Directorio de parquet. Opciones: ruta local o "" si se consulta remoto.
+    cache_ttl_days: 30            # Días de caché. Opciones: 7-90.
+
+  # --- Web del establecimiento ----------------------------------------------
+  website:
+    enabled: true                 # [PoC] true. Opciones: true | false. [Prod] true.
+    timeout_seconds: 10           # Tiempo máximo por página. Opciones: 5-30.
+    user_agent: "TurisLabDoctor/0.1 (+https://example.org/bot)"  # Identificación y contacto. Opciones: cadena con URL de contacto.
+    max_pages: 3                  # Páginas a revisar por establecimiento. Opciones: 1-10.
+    follow_redirects: true        # true = sigue 301/302. Opciones: true | false.
+    cache_ttl_days: 3             # Días de caché. Opciones: 1-14.
+    check_ssl: true               # true = marca certificado inválido. Opciones: true | false.
+    keywords: ["cerrado", "reformas", "nuevo propietario", "traspaso"]  # Términos de cierre/cambio. Opciones: lista de cadenas.
+
+  # --- Teléfono --------------------------------------------------------------
+  phone:
+    enabled: false                # [PoC] false: verificación manual. Opciones: true | false. [Prod] true con proveedor.
+    provider: manual              # Proveedor. Opciones: manual | vapi | retell | dograh.
+    call_window: "09:00-18:00"    # Ventana horaria local. Opciones: "HH:MM-HH:MM".
+    max_attempts: 3               # Intentos por establecimiento. Opciones: 1-5.
+    disclose_ai: true             # Obligatorio si hay IA (AI Act art. 50). Opciones: true | false.
+    record_calls: false           # false por defecto. Opciones: true | false. true requiere consentimiento explícito.
+    excluded_numbers: []          # Lista de no llamar. Opciones: lista de teléfonos E.164.
+
+  # --- Registro oficial ------------------------------------------------------
+  registry:
+    enabled: false                # [PoC] false: sin acceso. Opciones: true | false. [Prod] true si hay convenio/API.
+    url: ""                       # Endpoint del registro. Opciones: "" o URL HTTPS.
+    api_key_env: ""               # NOMBRE de la env var con la clave. Opciones: "" o nombre de variable.
+    timeout_seconds: 15           # Tiempo máximo por petición. Opciones: 5-60.
+
+  # --- Noticias / prensa -----------------------------------------------------
+  news:
+    enabled: false                # [PoC] false. Opciones: true | false. [Prod] true solo si aporta valor.
+    provider: ""                  # Proveedor. Opciones: "" | rss | gnews | newsapi.
+    api_key_env: ""               # NOMBRE de la env var con la clave. Opciones: "" o nombre de variable.
+    feeds: []                     # URLs RSS si provider=rss. Opciones: lista de URLs.
+    max_items: 20                 # Noticias máximas por establecimiento. Opciones: 5-100.
+
+  # --- Yelp ------------------------------------------------------------------
+  yelp:
+    enabled: false                # [PoC] false: sin contrato. Opciones: true | false. [Prod] true con API.
+    api_key_env: YELP_API_KEY     # NOMBRE de la env var con la clave. Opciones: cualquier nombre válido.
+    timeout_seconds: 10           # Tiempo máximo por petición. Opciones: 5-30.
+
+  # --- TripAdvisor -----------------------------------------------------------
+  tripadvisor:
+    enabled: false                # [PoC] false: sin contrato. Opciones: true | false. [Prod] true con Terra/Discover.
+    api_key_env: TRIPADVISOR_API_KEY  # NOMBRE de la env var con la clave. Opciones: cualquier nombre válido.
+    timeout_seconds: 10           # Tiempo máximo por petición. Opciones: 5-30.
+
+# -----------------------------------------------------------------------------
+# Resolución de identidad
+# -----------------------------------------------------------------------------
+identity:
+  auto_match_threshold: 0.85      # Match automático a partir de este valor. Opciones: 0.0-1.0. [Prod] 0.85-0.90.
+  review_threshold: 0.65          # Por debajo de auto y por encima de esto: revisión manual. Opciones: 0.0-1.0. [Prod] 0.60-0.75.
+  geo_radius_m: 150               # Radio para comparar coordenadas. Opciones: 50-500 metros. [Prod] 100-200.
+  normalize_unicode: true         # true = quita tildes y normaliza. Opciones: true | false.
+  weights:
+    name: 0.35                    # Peso de la similitud de nombre. Opciones: 0.0-1.0; la suma de los 5 pesos debe ser 1.0.
+    address: 0.30                 # Peso de la similitud de dirección. Opciones: 0.0-1.0.
+    geo: 0.20                     # Peso de la proximidad geográfica. Opciones: 0.0-1.0.
+    phone: 0.10                   # Peso de la coincidencia de teléfono. Opciones: 0.0-1.0.
+    website: 0.05                 # Peso de la coincidencia de web. Opciones: 0.0-1.0.
+
+# -----------------------------------------------------------------------------
+# Scoring
+# -----------------------------------------------------------------------------
+scoring:
+  priority_weights:
+    closure_risk: 0.40            # Peso del riesgo de cierre. Opciones: 0.0-1.0; la suma de los 6 debe ser 1.0.
+    quality_risk: 0.25            # Peso del riesgo de calidad. Opciones: 0.0-1.0.
+    quality_delta: 0.15           # Peso de la caída de calidad. Opciones: 0.0-1.0.
+    staleness: 0.10               # Peso de los datos viejos. Opciones: 0.0-1.0.
+    impact: 0.05                  # Peso del impacto turístico. Opciones: 0.0-1.0.
+    complaints: 0.05              # Peso de las quejas formales. Opciones: 0.0-1.0.
+  closure_family_weights:
+    direct_status: 0.45           # Peso del estado directo. Opciones: 0.0-1.0; la suma de las 4 debe ser 1.0.
+    activity: 0.25                # Peso de la actividad. Opciones: 0.0-1.0.
+    context: 0.15                 # Peso del contexto. Opciones: 0.0-1.0.
+    official: 0.15                # Peso de la fuente oficial. Opciones: 0.0-1.0.
+  quality_family_weights:
+    reviews: 0.35                 # Peso de las reseñas. Opciones: 0.0-1.0; la suma de las 5 debe ser 1.0.
+    official: 0.35                # Peso de la fuente oficial. Opciones: 0.0-1.0.
+    product: 0.15                 # Peso del producto/servicio. Opciones: 0.0-1.0.
+    news: 0.10                    # Peso de las noticias. Opciones: 0.0-1.0.
+    freshness: 0.05               # Peso de la frescura. Opciones: 0.0-1.0.
+  confidence_factor: 0.3          # priority *= 0.7 + factor * confianza. Opciones: 0.0-1.0. [Prod] calibrar con datos reales.
+  hysteresis_scans: 2             # Scans consecutivos para confirmar un cambio de tier. Opciones: 1-3. [Prod] 2.
+  hysteresis_weight: 0.3          # Peso del score anterior al suavizar. Opciones: 0.0-0.5.
+  volatile_delta: 15              # Diferencia que marca un score como volátil. Opciones: 5-30 puntos.
+  seasonal_adjustment: true       # true = baja el peso del cierre temporal en temporada baja. Opciones: true | false.
+
+# -----------------------------------------------------------------------------
+# Tiers y priorización
+# -----------------------------------------------------------------------------
+tiers:
+  p0_min: 45                      # Umbral P0. Opciones: 0-100. [PoC] 45: calibrado a la cobertura de evidencia actual (solo closure+staleness, máximo ~50). [Prod] 80 al añadir fuentes de calidad e impacto.
+  p1_min: 35                      # Umbral P1. Opciones: 0-100. [PoC] 35. [Prod] 65.
+  p2_min: 20                      # Umbral P2. Opciones: 0-100. [PoC] 20. [Prod] 45.
+  min_confidence: 0.5             # Confianza mínima para asignar P0. Opciones: 0.0-1.0.
+  collect_data_confidence: 0.35   # Por debajo: "recoger datos" en vez de visitar. Opciones: 0.0-1.0.
+
+# -----------------------------------------------------------------------------
+# Servidor HTTP
+# -----------------------------------------------------------------------------
+server:
+  addr: ":8090"                   # [PoC] :8090. Opciones: ":8080", ":8090", "127.0.0.1:8090". [Prod] detrás de TLS/proxy.
+  read_timeout: 15s               # Tiempo máximo de lectura. Opciones: 5s-60s.
+  write_timeout: 30s              # Tiempo máximo de escritura. Opciones: 10s-120s.
+  idle_timeout: 60s               # Tiempo máximo de conexión inactiva. Opciones: 30s-300s.
+  cors_origins: []                # [] = same-origin. Opciones: lista de orígenes, p. ej. ["https://app.example.org"]. [Prod] restringir.
+  static_dir: ""                  # "" = UI embebida. Opciones: "" o ruta a un build externo.
+
+# -----------------------------------------------------------------------------
+# Agente conversacional
+# -----------------------------------------------------------------------------
+agent:
+  enabled: false                  # [PoC] false u opcional. Opciones: true | false. [Prod] true.
+  read_only: true                 # [PoC] true: solo consulta. Opciones: true | false. [Prod] false solo con tools de escritura y confirmación.
+  max_turns: 12                   # Rondas máximas por petición. Opciones: 1-30.
+  model:
+    provider: openai              # Proveedor. Opciones: openai | gemini.
+    name: "gpt-4.1-mini"          # Modelo del proveedor. Opciones: el nombre exacto que acepte el endpoint.
+    base_url: ""                  # "" = API oficial. Opciones: "" o endpoint compatible OpenAI, p. ej. "http://localhost:4000/v1".
+    api_key_env: OPENAI_API_KEY   # NOMBRE de la env var con la clave. Opciones: cualquier nombre válido; nunca la clave literal.
+  suggestions: []                 # [] = prompts por defecto. Opciones: lista de cadenas.
+
+# -----------------------------------------------------------------------------
+# Métricas y logs
+# -----------------------------------------------------------------------------
+metrics:
+  enabled: true                   # [PoC] true. Opciones: true | false. [Prod] true.
+  path: /metrics                  # Ruta de exposición Prometheus. Opciones: cualquier ruta HTTP.
+
+logging:
+  level: info                     # Nivel de log. Opciones: debug | info | warn | error.
+  format: text                    # Formato. Opciones: text | json. [Prod] json para agregadores.
+  redact_pii: true                # true = oculta teléfonos/emails en logs. Opciones: true | false. [Prod] true.
+
+# -----------------------------------------------------------------------------
+# Legal y retención (la PoC no sustituye una revisión legal)
+# -----------------------------------------------------------------------------
+legal:
+  scraping_ack: true              # [PoC] true = el operador acepta el riesgo de ToS del scraping. Opciones: true | false. [Prod] false: usar APIs oficiales.
+  data_retention_days: 90         # Días de retención de señales y snapshots. Opciones: 30-365; 0 = sin límite (no recomendado).
+  gdpr_contact: ""                # Contacto del DPO/responsable. Opciones: "" o email.
+  store_reviewer_names: false     # false = no guardar nombres de reseñistas. Opciones: true | false. [Prod] false.

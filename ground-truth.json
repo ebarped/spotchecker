@@ -1,0 +1,67 @@
+{
+  "_comment": "Verdad terreno para los 10 establecimientos reales de la PoC (Madrid). NUNCA se usa para scoring, solo para validar el algoritmo. Los estados de cierre se verificaron con prensa, no con el scraper.",
+  "_updated": "2026-11-06",
+  "establishments": [
+    {
+      "id": "rest-botin",
+      "name": "Sobrino de Botín",
+      "ground_truth_status": "active",
+      "notes": "Abierto. Guiness como restaurante más antiguo del mundo."
+    },
+    {
+      "id": "rest-casalucio",
+      "name": "Casa Lucio",
+      "ground_truth_status": "active",
+      "notes": "Abierto."
+    },
+    {
+      "id": "rest-paraguas",
+      "name": "El Paraguas",
+      "ground_truth_status": "active",
+      "notes": "Abierto."
+    },
+    {
+      "id": "rest-castela",
+      "name": "La Castela",
+      "ground_truth_status": "active",
+      "notes": "Abierto."
+    },
+    {
+      "id": "rest-horcher",
+      "name": "Horcher",
+      "ground_truth_status": "active",
+      "notes": "Abierto."
+    },
+    {
+      "id": "rest-puntomx",
+      "name": "Punto MX",
+      "ground_truth_status": "closed_permanently",
+      "notes": "CERRADO en 2022. Cierre permanente del restaurante de Roberto Ruiz en General Pardiñas. Debe estar en el top 3."
+    },
+    {
+      "id": "rest-santceloni",
+      "name": "Santceloni",
+      "ground_truth_status": "closed_permanently",
+      "notes": "CERRADO en 2020 tras 20 años en el Hotel Hesperia. Cierre permanente confirmado por prensa gastronómica. Debe estar en el top 3."
+    },
+    {
+      "id": "hotel-palace",
+      "name": "The Palace, a Luxury Collection Hotel",
+      "ground_truth_status": "active",
+      "notes": "Abierto."
+    },
+    {
+      "id": "hotel-ritz",
+      "name": "Mandarin Oriental Ritz, Madrid",
+      "ground_truth_status": "active",
+      "notes": "Abierto tras la reforma de 2021."
+    },
+    {
+      "id": "hotel-villamagna",
+      "name": "Rosewood Villa Magna",
+      "ground_truth_status": "active",
+      "notes": "Abierto tras la reforma de 2021."
+    }
+  ],
+  "poc_success_criterion": "Los establecimientos rest-puntomx y rest-santceloni deben estar en el top 3 de la cola de prioridad tras el primer scan, y ningún establecimiento activo debe quedar marcado como closure_confirmed."
+}
