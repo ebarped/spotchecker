@@ -252,12 +252,12 @@ type ServerConfig struct {
 }
 
 type AgentConfig struct {
-	Enabled     bool             `yaml:"enabled"`
-	ReadOnly    bool             `yaml:"read_only"`
-	MaxTurns    int              `yaml:"max_turns"`
-	Model       AgentModelConfig `yaml:"model"`
+	Enabled     bool              `yaml:"enabled"`
+	ReadOnly    bool              `yaml:"read_only"`
+	MaxTurns    int               `yaml:"max_turns"`
+	Model       AgentModelConfig  `yaml:"model"`
 	MCP         []MCPServerConfig `yaml:"mcp"`
-	Suggestions []string         `yaml:"suggestions"`
+	Suggestions []string          `yaml:"suggestions"`
 }
 
 type AgentModelConfig struct {

@@ -4,7 +4,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -170,6 +169,12 @@ func (s *Server) Handler() http.Handler {
 				},
 			})
 		})
+
+		// Unknown /api endpoints answer JSON 404 instead of falling through
+		// to the single page app, which would answer HTML.
+		r.NotFound(func(w http.ResponseWriter, req *http.Request) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
+		})
 	})
 
 	if s.metrics != nil {
@@ -177,6 +182,13 @@ func (s *Server) Handler() http.Handler {
 	}
 
 	if s.ui != nil {
+		files := http.FileServer(http.FS(s.ui))
+
+		// _app/immutable/** holds content-hashed assets: cache them
+		// forever. Everything else under _app/ (e.g. version.json) changes
+		// with each build.
+		r.Handle("/_app/immutable/*", cacheImmutable(files))
+		r.Handle("/_app/*", files)
 		r.Handle("/*", spaHandler(s.ui))
 	}
 
@@ -236,36 +248,81 @@ func filterQueue(queue []model.QueueItem, params url.Values) []model.QueueItem {
 	return filtered[offset:end]
 }
 
+// spaHandler serves the static files of the UI bundle and falls back to
+// index.html for client-side routes, so the single page app keeps working.
+//
+// adapter-static writes prerendered routes as <route>.html (e.g.
+// turislab.html, how-it-works.html), so an extensionless path is resolved
+// against that file first: requesting /turislab/ must not answer the root
+// shell, because the prerendered HTML references its assets relative to the
+// page and would otherwise fetch them from /turislab/_app/... .
+//
+// A missing path with an extension is a missing asset: it must answer 404,
+// never the HTML fallback. Serving index.html for a .js module is what the
+// browser reports as corrupted content.
 func spaHandler(fsys fs.FS) http.Handler {
+	files := http.FileServer(http.FS(fsys))
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		p := path.Clean(r.URL.Path)
-		if p == "/" {
-			p = "/index.html"
+		name := strings.TrimPrefix(path.Clean(r.URL.Path), "/")
+		if name == "" || name == "." {
+			name = "index.html"
 		}
-		p = strings.TrimPrefix(p, "/")
-
-		f, err := fsys.Open(p)
-		if err != nil {
-			f, err = fsys.Open("index.html")
-			if err != nil {
-				http.Error(w, "SPA index not found", http.StatusNotFound)
-				return
-			}
-		}
-		defer f.Close()
-
-		stat, err := f.Stat()
-		if err != nil || stat.IsDir() {
-			f2, err2 := fsys.Open("index.html")
-			if err2 != nil {
-				http.Error(w, "SPA index not found", http.StatusNotFound)
-				return
-			}
-			defer f2.Close()
-			http.ServeContent(w, r, "index.html", time.Time{}, f2.(io.ReadSeeker))
+		served, ok := resolveUIPath(fsys, name)
+		if !ok {
+			http.NotFound(w, r)
 			return
 		}
+		if served != name {
+			r = r.Clone(r.Context())
+			r.URL.Path = "/" + served
+			// http.FileServer redirects any path ending in /index.html to
+			// its directory, which would bounce the SPA fallback; serve the
+			// directory path instead (root for the shell).
+			if strings.HasSuffix(r.URL.Path, "/index.html") {
+				r.URL.Path = strings.TrimSuffix(r.URL.Path, "index.html")
+			}
+		}
+		if strings.HasSuffix(served, ".html") {
+			// The entry point must not be cached: it references the hashed
+			// assets of the build it was produced with.
+			w.Header().Set("Cache-Control", "no-cache")
+		}
+		files.ServeHTTP(w, r)
+	})
+}
 
-		http.ServeContent(w, r, stat.Name(), stat.ModTime(), f.(io.ReadSeeker))
+// resolveUIPath maps a request path to a file of the bundle. Routes without
+// an extension fall back to the SPA shell (index.html, or the tracked
+// placeholder when the real UI has not been built).
+func resolveUIPath(fsys fs.FS, name string) (string, bool) {
+	if isUIFile(fsys, name) {
+		return name, true
+	}
+	if isUIFile(fsys, name+".html") {
+		return name + ".html", true
+	}
+	if index := path.Join(name, "index.html"); isUIFile(fsys, index) {
+		return index, true
+	}
+	if path.Ext(name) == "" {
+		if isUIFile(fsys, "index.html") {
+			return "index.html", true
+		}
+		if isUIFile(fsys, "placeholder.html") {
+			return "placeholder.html", true
+		}
+	}
+	return "", false
+}
+
+func isUIFile(fsys fs.FS, name string) bool {
+	stat, err := fs.Stat(fsys, name)
+	return err == nil && !stat.IsDir()
+}
+
+func cacheImmutable(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		next.ServeHTTP(w, r)
 	})
 }

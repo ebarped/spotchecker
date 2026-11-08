@@ -83,11 +83,11 @@ func TestOSMCollectSkipsWithoutCoordinates(t *testing.T) {
 
 func TestOSMCollectTagSignals(t *testing.T) {
 	cases := []struct {
-		name     string
-		tags     map[string]string
-		wantRaw  string
-		wantVal  float64
-		wantFam  model.SignalFamily
+		name    string
+		tags    map[string]string
+		wantRaw string
+		wantVal float64
+		wantFam model.SignalFamily
 	}{
 		{"disused amenity", map[string]string{"disused:amenity": "restaurant"}, "disused", 0.6, model.FamilyDirectStatus},
 		{"disused tourism", map[string]string{"disused:tourism": "hotel"}, "disused", 0.6, model.FamilyDirectStatus},

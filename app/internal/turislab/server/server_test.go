@@ -231,3 +231,97 @@ func TestSPAFallback(t *testing.T) {
 		t.Errorf("body = %q, want the index.html contents", body)
 	}
 }
+
+// uiBuildFixture mirrors the real adapter-static output: prerendered routes
+// as <route>.html plus hashed assets under _app/immutable.
+func uiBuildFixture() fstest.MapFS {
+	return fstest.MapFS{
+		"index.html":                        &fstest.MapFile{Data: []byte("root shell")},
+		"turislab.html":                     &fstest.MapFile{Data: []byte("turislab shell")},
+		"how-it-works.html":                 &fstest.MapFile{Data: []byte("how it works shell")},
+		"placeholder.html":                  &fstest.MapFile{Data: []byte("placeholder page")},
+		"robots.txt":                        &fstest.MapFile{Data: []byte("User-agent: *")},
+		"_app/version.json":                 &fstest.MapFile{Data: []byte(`{"version":"1"}`)},
+		"_app/immutable/entry/start.ABC.js": &fstest.MapFile{Data: []byte("console.log(1)")},
+	}
+}
+
+func newUIServer(t *testing.T) *Server {
+	t.Helper()
+	return New(uiBuildFixture(), logx.New(&strings.Builder{}))
+}
+
+// TestPrerenderedRoute serves the page the client-side route expects instead
+// of the root shell: with relative asset paths, /turislab/ must answer
+// turislab.html or the browser fetches its assets from /turislab/_app/... .
+func TestPrerenderedRoute(t *testing.T) {
+	srv := newUIServer(t)
+
+	for _, tc := range []struct{ path, want string }{
+		{"/turislab", "turislab shell"},
+		{"/turislab/", "turislab shell"},
+		{"/how-it-works", "how it works shell"},
+		{"/", "root shell"},
+	} {
+		rec := get(t, srv, tc.path)
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s: status = %d, want 200", tc.path, rec.Code)
+			continue
+		}
+		if body := rec.Body.String(); body != tc.want {
+			t.Errorf("GET %s: body = %q, want %q", tc.path, body, tc.want)
+		}
+	}
+}
+
+// TestMissingAssetIs404 guards against the HTML fallback answering for JS and
+// CSS, which the browser reports as corrupted content.
+func TestMissingAssetIs404(t *testing.T) {
+	srv := newUIServer(t)
+
+	for _, p := range []string{
+		"/_app/immutable/entry/missing.js",
+		"/_app/immutable/assets/missing.css",
+		"/turislab/_app/immutable/entry/start.ABC.js",
+	} {
+		if rec := get(t, srv, p); rec.Code != http.StatusNotFound {
+			t.Errorf("GET %s: status = %d, want 404", p, rec.Code)
+		}
+	}
+}
+
+func TestUICacheHeaders(t *testing.T) {
+	srv := newUIServer(t)
+
+	rec := get(t, srv, "/turislab/")
+	if cc := rec.Header().Get("Cache-Control"); cc != "no-cache" {
+		t.Errorf("prerendered page cache-control = %q, want no-cache", cc)
+	}
+
+	rec = get(t, srv, "/_app/immutable/entry/start.ABC.js")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("asset status = %d, want 200", rec.Code)
+	}
+	if cc := rec.Header().Get("Cache-Control"); cc != "public, max-age=31536000, immutable" {
+		t.Errorf("immutable asset cache-control = %q", cc)
+	}
+
+	rec = get(t, srv, "/_app/version.json")
+	if cc := rec.Header().Get("Cache-Control"); strings.Contains(cc, "immutable") {
+		t.Errorf("version.json cache-control = %q, must not be immutable", cc)
+	}
+}
+
+// TestUnknownAPIIsJSON makes sure the reserved /api namespace never answers
+// the SPA's HTML.
+func TestUnknownAPIIsJSON(t *testing.T) {
+	srv := newUIServer(t)
+
+	rec := get(t, srv, "/api/does-not-exist")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("content-type = %q, want application/json", ct)
+	}
+}

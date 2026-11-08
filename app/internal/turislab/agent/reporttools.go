@@ -164,9 +164,9 @@ func reportSummary(report *model.Report) map[string]any {
 		return map[string]any{"error": "no scan report available yet"}
 	}
 	return map[string]any{
-		"generated_at":     report.GeneratedAt,
-		"establishments":   report.EstablishmentCount,
-		"total_scored":     report.Summary.Total,
+		"generated_at":   report.GeneratedAt,
+		"establishments": report.EstablishmentCount,
+		"total_scored":   report.Summary.Total,
 		"tiers": map[string]int{
 			"P0":           report.Summary.P0,
 			"P1":           report.Summary.P1,
@@ -185,8 +185,8 @@ func reportSummary(report *model.Report) map[string]any {
 // estDetail is one establishment as the agent sees it: the registry fields,
 // the full score breakdown and the primary evidence signals.
 type estDetail struct {
-	Establishment map[string]any `json:"establishment"`
-	Score         map[string]any `json:"score"`
+	Establishment map[string]any   `json:"establishment"`
+	Score         map[string]any   `json:"score"`
 	Evidence      []map[string]any `json:"evidence,omitempty"`
 }
 
@@ -226,18 +226,18 @@ func establishmentDetail(report *model.Report, id string) (*estDetail, error) {
 		score := map[string]any{}
 		if s := item.Score; s != nil {
 			score = map[string]any{
-				"tier":            string(s.Tier),
-				"priority":        s.Priority,
-				"closure_risk":    s.ClosureRisk,
-				"quality_risk":    s.QualityRisk,
-				"quality_delta":   s.QualityDelta,
-				"confidence":      s.Confidence,
-				"evidence_count":  s.EvidenceCount,
-				"status":          string(s.Status),
-				"reason":          s.Reason,
-				"volatile":        s.Volatile,
-				"conflict":        s.ConflictDetected,
-				"computed_at":     s.ComputedAt,
+				"tier":           string(s.Tier),
+				"priority":       s.Priority,
+				"closure_risk":   s.ClosureRisk,
+				"quality_risk":   s.QualityRisk,
+				"quality_delta":  s.QualityDelta,
+				"confidence":     s.Confidence,
+				"evidence_count": s.EvidenceCount,
+				"status":         string(s.Status),
+				"reason":         s.Reason,
+				"volatile":       s.Volatile,
+				"conflict":       s.ConflictDetected,
+				"computed_at":    s.ComputedAt,
 			}
 		}
 
@@ -286,10 +286,10 @@ func buildTools(source reportSource) []tool.Tool {
 		Limit        int    `json:"limit,omitempty"`
 	}
 	type listEstsResult struct {
-		Total         int                    `json:"total"`
-		Offset        int                    `json:"offset"`
-		Returned      int                    `json:"returned"`
-		NextOffset    int                    `json:"next_offset,omitempty"`
+		Total          int                    `json:"total"`
+		Offset         int                    `json:"offset"`
+		Returned       int                    `json:"returned"`
+		NextOffset     int                    `json:"next_offset,omitempty"`
 		Establishments []establishmentOutline `json:"establishments"`
 	}
 	listEsts := newTool(functiontool.New(functiontool.Config{
@@ -313,9 +313,9 @@ func buildTools(source reportSource) []tool.Tool {
 			Limit:        args.Limit,
 		}, maxToolHistoryChars-1024)
 		res := listEstsResult{
-			Total:         total,
-			Offset:        args.Offset,
-			Returned:      len(ests),
+			Total:          total,
+			Offset:         args.Offset,
+			Returned:       len(ests),
 			Establishments: ests,
 		}
 		if args.Offset+len(ests) < total {

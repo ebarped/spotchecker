@@ -19,6 +19,13 @@ export default defineConfig({
 			// Static build: the SPA fetches /api/report from whatever serves it.
 			// The output goes straight into the Go module's embed folder
 			// (../app/ui/build), which `go:embed` picks up at compile time.
+			//
+			// Asset paths are absolute: the Go server mounts the bundle at the
+			// root, but prerendered pages also live at nested routes
+			// (/turislab/, /how-it-works/). With relative paths those pages
+			// would request ./_app/... from /turislab/_app/... and get HTML
+			// instead of JS.
+			paths: { relative: false },
 			adapter: adapter({ pages: '../app/ui/build', assets: '../app/ui/build' })
 		})
 	],

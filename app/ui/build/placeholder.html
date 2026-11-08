@@ -1,18 +1,18 @@
 <!doctype html>
-<!-- Source of web/build/placeholder.html. The UI build output (web/build) is
-     gitignored, and go:embed needs at least one file to compile on a clean
-     clone: `make web-build` copies this page into the build output, where
+<!-- Source of app/ui/build/placeholder.html. The UI build output (app/ui/build)
+     is gitignored, and go:embed needs at least one file to compile on a clean
+     clone: `make ui-build` copies this page into the build output, where
      spaHandler serves it whenever index.html is absent (i.e. until the real
      UI is built). The copy never changes between builds, so git stays clean. -->
 <html lang="en">
 	<head>
 		<meta charset="utf-8" />
-		<title>grafana-doctor</title>
+		<title>turislab-doctor</title>
 	</head>
 	<body>
-		<h1>grafana-doctor</h1>
+		<h1>turislab-doctor</h1>
 		<p>The web UI has not been built yet. Run:</p>
-		<pre>make web-build</pre>
+		<pre>make ui-build</pre>
 		<p>…then rebuild and restart the binary. The report API is served at
 		<code>/api/report</code> regardless.</p>
 	</body>

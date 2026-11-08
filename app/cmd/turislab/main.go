@@ -29,6 +29,7 @@ import (
 	"github.com/datadope/turislab-doctor/internal/turislab/source"
 	"github.com/datadope/turislab-doctor/internal/turislab/store"
 	"github.com/datadope/turislab-doctor/internal/turislab/validate"
+	"github.com/datadope/turislab-doctor/ui"
 )
 
 func main() {
@@ -39,7 +40,7 @@ func main() {
 	validateOnly := flag.Bool("validate", false, "compare the latest scores with the ground truth and exit")
 	validateTop := flag.Int("validate-top", 3, "top-N cut-off used by --validate")
 	validateStrict := flag.Bool("validate-strict", false, "fail --validate when an active establishment is flagged as closure_confirmed")
-	staticDir := flag.String("static-dir", "", "serve the web UI from this directory (e.g. ui/build); empty disables the UI")
+	staticDir := flag.String("static-dir", "", "serve the web UI from this directory instead of the embedded bundle (e.g. app/ui/build)")
 	flag.Parse()
 
 	log := logx.Default()
@@ -129,10 +130,23 @@ func main() {
 
 	go scanner.Start(ctx)
 
-	var uiFS fs.FS
-	if *staticDir != "" {
-		uiFS = os.DirFS(*staticDir)
-		log.Info("server", "serving the web UI from %s", *staticDir)
+	// The web UI ships inside the binary. --static-dir (or server.static_dir)
+	// serves a build from disk instead, so UI changes can be tried without
+	// recompiling.
+	uiFS, err := fs.Sub(ui.Build, "build")
+	if err != nil {
+		log.Error("server", "embedded UI: %v", err)
+		os.Exit(1)
+	}
+	dir := *staticDir
+	if dir == "" {
+		dir = cfg.Server.StaticDir
+	}
+	if dir != "" {
+		uiFS = os.DirFS(dir)
+		log.Info("server", "serving the web UI from %s", dir)
+	} else {
+		log.Info("server", "serving the embedded web UI")
 	}
 	srv := server.New(uiFS, log, server.WithScanner(scanner))
 	go refreshLoop(ctx, db, srcs, scanner, srv, log)

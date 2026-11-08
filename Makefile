@@ -39,7 +39,7 @@ tidy: ## Sync go.mod / go.sum
 	$(GO) -C $(APP) mod tidy
 
 run: build ## Run the scanner + API + UI on :$(PORT)
-	./$(BIN) --config $(CONFIG) --addr :$(PORT) --static-dir $(APP)/ui/build
+	./$(BIN) --config $(CONFIG) --addr :$(PORT)
 
 scan-once: build ## Scan every establishment once and exit
 	./$(BIN) --config $(CONFIG) --once
@@ -67,7 +67,7 @@ turislab-scraper: ## Download the gosom Google Maps scraper into bin/
 	echo "installed $(TL_SCRAPER_BIN)"
 
 serve: clean build ## Clean, rebuild everything (UI included) and serve on :$(PORT)
-	./$(BIN) --config $(CONFIG) --addr :$(PORT) --static-dir $(APP)/ui/build
+	./$(BIN) --config $(CONFIG) --addr :$(PORT)
 
 clean: ## Remove the binary and the embedded UI build
 	rm -f $(BIN)

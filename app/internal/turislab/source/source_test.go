@@ -85,9 +85,9 @@ type fakeSource struct {
 	health  SourceHealth
 }
 
-func (f *fakeSource) Name() string                       { return f.name }
-func (f *fakeSource) Enabled() bool                      { return f.enabled }
-func (f *fakeSource) Capabilities() []model.SignalKind   { return nil }
+func (f *fakeSource) Name() string                     { return f.name }
+func (f *fakeSource) Enabled() bool                    { return f.enabled }
+func (f *fakeSource) Capabilities() []model.SignalKind { return nil }
 func (f *fakeSource) Collect(_ context.Context, _ *model.Establishment) ([]*model.Signal, error) {
 	return nil, nil
 }
