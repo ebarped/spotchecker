@@ -1,8 +1,8 @@
 # Local configuration (may contain service credentials).
-config.yaml
-config.local.yaml
-config.turislab.yaml
-app/config.turislab.yaml
+/config.yaml
+/config.local.yaml
+/config.turislab.yaml
+/app/config.turislab.yaml
 
 # Generated reports.
 report.json
@@ -16,9 +16,10 @@ turislab.db-wal
 *.db-shm
 *.db-wal
 
-# Binaries.
-grafana-doctor
-turislab
+# Binaries (anchored: source dirs are also named "turislab").
+/grafana-doctor
+/turislab
+/app/turislab
 /bin/
 
 # Web UI build output: the SvelteKit app in ui/ compiles straight into the
