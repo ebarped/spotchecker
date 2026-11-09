@@ -72,10 +72,10 @@
 				<button
 					type="button"
 					class="mono hidden whitespace-nowrap px-1 text-[11px] text-faint transition-colors hover:text-muted sm:block"
-					title="Click to copy the session id"
+					title="Pulsa para copiar el id de sesión"
 					onclick={copySession}
 				>
-					{copied ? 'session_id: copied!' : `session_id: ${agent.sessionId}`}
+					{copied ? 'session_id: ¡copiado!' : `session_id: ${agent.sessionId}`}
 				</button>
 			{/if}
 		</div>
@@ -85,8 +85,8 @@
 		{#if agent.messages.length === 0}
 			<div class="mx-auto max-w-md pt-10 text-center">
 				<p class="text-sm text-muted">
-					Ask anything about the inspection report: check an establishment's score, see which
-					signals support it, or summarize the visit queue.
+					Pregúntale lo que quieras sobre el informe de inspección: el score de un
+					establecimiento, qué señales lo respaldan, o un resumen de la cola de visitas.
 				</p>
 				{#if agent.info && agent.info.suggestions.length > 0}
 					<div class="mt-4 flex flex-wrap justify-center gap-2">
@@ -118,8 +118,8 @@
 			bind:value={draft}
 			rows="2"
 			placeholder={ready
-				? 'Ask the agent to investigate…'
-				: 'The scan is still running — the chat answers as soon as the report is ready.'}
+				? 'Pide al agente que investigue…'
+				: 'El scan sigue en marcha — el chat responde en cuanto el informe esté listo.'}
 			disabled={!ready}
 			onkeydown={keydown}
 			class="min-w-0 flex-1 resize-none rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-line-strong focus:outline-none"
@@ -131,12 +131,12 @@
 					onclick={() => agent.stop()}
 					class="tile flex flex-[2] items-center justify-center gap-1.5 rounded-xl text-sm font-semibold text-white"
 					style="--tile: #b85c38"
-					title="Stop the agent"
+					title="Detener al agente"
 				>
 					<svg class="size-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
 						<rect x="6" y="6" width="12" height="12" rx="2.5" />
 					</svg>
-					Stop
+					Detener
 				</button>
 			{:else}
 				<button
@@ -145,7 +145,7 @@
 					class="tile flex flex-[2] items-center justify-center rounded-xl text-sm font-semibold text-white disabled:opacity-40"
 					style="--tile: #b85c38"
 				>
-					Send
+					Enviar
 				</button>
 			{/if}
 			<button
@@ -154,7 +154,7 @@
 				disabled={agent.streaming || agent.messages.length === 0}
 				class="flex-1 rounded-xl border border-accent/40 bg-accent/10 text-[11px] font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
 			>
-				New chat
+				Nueva conversación
 			</button>
 		</div>
 	</form>

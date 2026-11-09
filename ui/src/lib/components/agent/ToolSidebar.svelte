@@ -12,19 +12,19 @@
 	<div class="flex items-baseline justify-between px-4 pt-3 pb-2.5">
 		<p class="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink">
 			<span class="size-1.5 rounded-full bg-accent"></span>
-			Tools
+			Herramientas
 		</p>
 		{#if agent.catalog}
-			<p class="text-[11px] text-faint">{total} loaded</p>
+			<p class="text-[11px] text-faint">{total} cargadas</p>
 		{/if}
 	</div>
 	<div class="border-t border-line-strong px-4 py-3">
 
 	{#if !agent.catalog}
-		<p class="text-sm text-muted">Loading the tool catalog…</p>
+		<p class="text-sm text-muted">Cargando el catálogo de herramientas…</p>
 	{:else}
 		<section class="mb-4">
-			<p class="caption mb-1">Built-in</p>
+			<p class="caption mb-1">Integradas</p>
 			<div class="space-y-1">
 				{#each agent.catalog.builtin as source (source.key)}
 					<ToolSourceBlock {source} />
@@ -34,7 +34,7 @@
 
 		{#if agent.catalog.external.length > 0}
 			<section>
-				<p class="caption mb-1">External MCP servers</p>
+				<p class="caption mb-1">Servidores MCP externos</p>
 				<div class="space-y-1">
 					{#each agent.catalog.external as source (source.key)}
 						<ToolSourceBlock {source} />
@@ -43,7 +43,7 @@
 			</section>
 		{:else}
 			<p class="px-2 text-[11px] text-faint">
-				No external MCP servers configured — set them under <span class="mono">agent.mcp</span> in the config file.
+				No hay servidores MCP externos configurados — decláralos bajo <span class="mono">agent.mcp</span> en el fichero de configuración.
 			</p>
 		{/if}
 	{/if}

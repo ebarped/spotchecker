@@ -304,12 +304,12 @@ describe('persistence', () => {
 
 describe('httpErrorText', () => {
 	it('explains the statuses the chat endpoint uses', () => {
-		expect(httpErrorText(503)).toMatch(/scan is still running/);
-		expect(httpErrorText(409)).toMatch(/still answering/);
+		expect(httpErrorText(503)).toMatch(/scan sigue en marcha/);
+		expect(httpErrorText(409)).toMatch(/sigue respondiendo/);
 		expect(httpErrorText(400)).toMatch(/too long/);
 		expect(httpErrorText(413)).toMatch(/too large/);
 		expect(httpErrorText(422)).toMatch(/start a new chat/);
 		expect(httpErrorText(429)).toMatch(/busy/);
-		expect(httpErrorText(500)).toBe('The agent endpoint answered 500.');
+		expect(httpErrorText(500)).toBe('El endpoint del agente respondió 500.');
 	});
 });

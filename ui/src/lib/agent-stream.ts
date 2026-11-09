@@ -38,7 +38,7 @@ export type StreamEvent = {
 export const MAX_STORED_MESSAGES = 50;
 
 /** Shown when a run finished without a word or a tool call. */
-export const NO_ANSWER_TEXT = 'The model produced no answer — try again.';
+export const NO_ANSWER_TEXT = 'El modelo no produjo respuesta — inténtalo de nuevo.';
 
 /** Per-turn streaming state that is not part of the message itself. */
 export interface TurnState {
@@ -114,10 +114,10 @@ export function applyStreamEvent(reply: ChatMessage, event: StreamEvent, turn: T
 }
 
 /** Shown when the stream closes without a done or error event. */
-export const CONNECTION_LOST_TEXT = 'the connection closed before the answer finished';
+export const CONNECTION_LOST_TEXT = 'la conexión se cerró antes de terminar la respuesta';
 
 /** Fills a stopped run that had not said anything yet. */
-export const STOPPED_TEXT = 'The run was stopped before the answer finished.';
+export const STOPPED_TEXT = 'La ejecución se detuvo antes de terminar la respuesta.';
 
 /**
  * Closes a turn the user stopped mid-run: the partial answer and its
@@ -244,18 +244,18 @@ export function parseStoredChat(
 export function httpErrorText(status: number): string {
 	switch (status) {
 		case 503:
-			return 'The scan is still running — the chat answers as soon as the report is ready.';
+			return 'El scan sigue en marcha — el chat responde en cuanto el informe esté listo.';
 		case 409:
-			return 'This conversation is still answering another message (another tab?) — wait for it to finish.';
+			return 'Esta conversación sigue respondiendo otro mensaje (¿otra pestaña?) — espera a que acabe.';
 		case 400:
-			return 'The agent rejected the message (empty or too long).';
+			return 'El agente rechazó el mensaje (vacío o demasiado largo).';
 		case 413:
-			return 'The message is too large to send.';
+			return 'El mensaje es demasiado largo para enviarlo.';
 		case 422:
-			return 'This conversation is too long — start a new chat.';
+			return 'Esta conversación es demasiado larga — empieza una nueva.';
 		case 429:
-			return 'The assistant is busy with other chats — try again in a moment.';
+			return 'El asistente está ocupado con otros chats — prueba en un momento.';
 		default:
-			return `The agent endpoint answered ${status}.`;
+			return `El endpoint del agente respondió ${status}.`;
 	}
 }

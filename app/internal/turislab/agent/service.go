@@ -76,14 +76,14 @@ const finalRoundInstruction = "\n\nThis is your last step for this message: do n
 
 // budgetExhaustedText replaces a last-round answer that still tried to call
 // tools and wrote nothing.
-const budgetExhaustedText = "I used up this message's step budget before reaching a conclusion. Ask me to continue and I will pick up from here."
+const budgetExhaustedText = "Agoté el presupuesto de pasos de este mensaje antes de llegar a una conclusión. Pídeme continuar y retomo desde donde lo dejé."
 
 // defaultSuggestions are the suggested prompts of the UI.
 var defaultSuggestions = []string{
-	"Summarize this scan for the inspection team: which establishments need a visit first and why",
-	"Which establishments are closed or at highest closure risk, and what evidence supports it",
-	"Which municipalities concentrate most of the risk, and where should we send inspectors",
-	"Pick the top establishment of the queue and go through its evidence in detail",
+	"Resume este scan para el equipo de inspección: qué establecimientos necesitan visita primero y por qué",
+	"¿Qué establecimientos están cerrados o con mayor riesgo de cierre, y qué evidencia lo respalda?",
+	"¿Qué municipios concentran el riesgo, y dónde mandaríamos inspectores?",
+	"Coge el primer establecimiento de la cola y repasa su evidencia en detalle",
 }
 
 // Service runs the agent for the HTTP server.

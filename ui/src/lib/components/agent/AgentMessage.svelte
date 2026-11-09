@@ -54,7 +54,7 @@
 								{step.name}
 							</summary>
 							<pre
-								class="mono mt-1 max-h-40 overflow-auto rounded-xl border border-line bg-surface-2/60 p-2.5 text-[11px] whitespace-pre-wrap text-muted">{step.result ?? 'running…'}</pre>
+								class="mono mt-1 max-h-40 overflow-auto rounded-xl border border-line bg-surface-2/60 p-2.5 text-[11px] whitespace-pre-wrap text-muted">{step.result ?? 'en marcha…'}</pre>
 						</details>
 					{/each}
 				</div>
@@ -88,11 +88,11 @@
 			{#if message.error}
 				{#if message.text !== ''}
 					<p class="text-xs text-error">
-						The turn failed: {message.steps.find((s) => s.name === 'error')?.result ?? 'unknown error'}
+						El turno falló: {message.steps.find((s) => s.name === 'error')?.result ?? 'error desconocido'}
 					</p>
 				{:else}
 					<p class="text-xs text-error">
-						The turn failed: {message.steps.find((s) => s.name === 'error')?.result ?? 'no answer — try again'}
+						El turno falló: {message.steps.find((s) => s.name === 'error')?.result ?? 'sin respuesta — inténtalo de nuevo'}
 					</p>
 				{/if}
 			{/if}

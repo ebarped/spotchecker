@@ -25,11 +25,11 @@
 			data: {
 				label:
 					node.kind === 'user'
-						? 'question'
+						? 'Pregunta'
 						: node.kind === 'answer'
-							? 'answer'
+							? 'Respuesta'
 							: `tool: ${node.name ?? ''}`,
-				category: node.kind === 'user' ? 'question' : node.kind === 'answer' ? 'answer' : (node.category ?? 'tool'),
+				category: node.kind === 'user' ? 'Pregunta' : node.kind === 'answer' ? 'answer' : (node.category ?? 'tool'),
 				description: node.description ?? ''
 			}
 		}))
@@ -56,7 +56,7 @@
 		class="pointer-events-none absolute left-3 top-2 z-10 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-ink"
 	>
 		<span class="size-1.5 rounded-full bg-accent-2"></span>
-		Agent path
+		Ruta del agente
 	</p>
 	<!-- Delimited by the top: the canvas starts under the title, so the
 	     graph never slides behind it — the border-t is the delimiter. -->
@@ -70,8 +70,8 @@
 			<div
 				class="absolute inset-0 flex items-center justify-center px-8 text-center text-xs leading-relaxed text-faint"
 			>
-				The agent's traversal appears here — question, the tools it called and answer, chained
-				in the order they ran.
+				Aquí aparece el recorrido del agente — la pregunta, las herramientas que llamó y la
+				respuesta, encadenados en el orden en que se ejecutaron.
 			</div>
 		{:else}
 			<SvelteFlow
