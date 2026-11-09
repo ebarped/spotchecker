@@ -306,10 +306,10 @@ describe('httpErrorText', () => {
 	it('explains the statuses the chat endpoint uses', () => {
 		expect(httpErrorText(503)).toMatch(/scan sigue en marcha/);
 		expect(httpErrorText(409)).toMatch(/sigue respondiendo/);
-		expect(httpErrorText(400)).toMatch(/too long/);
-		expect(httpErrorText(413)).toMatch(/too large/);
-		expect(httpErrorText(422)).toMatch(/start a new chat/);
-		expect(httpErrorText(429)).toMatch(/busy/);
+		expect(httpErrorText(400)).toMatch(/demasiado largo/);
+		expect(httpErrorText(413)).toMatch(/demasiado largo/);
+		expect(httpErrorText(422)).toMatch(/empieza una nueva/);
+		expect(httpErrorText(429)).toMatch(/ocupado/);
 		expect(httpErrorText(500)).toBe('El endpoint del agente respondió 500.');
 	});
 });
