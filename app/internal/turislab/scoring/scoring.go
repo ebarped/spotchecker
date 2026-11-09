@@ -1,4 +1,9 @@
 // Package scoring computes closure_risk, quality_risk, quality_delta and priority.
+//
+// TBD (LLM as a judge): today the score is fully deterministic — signals,
+// weights and thresholds. A future signal may hand the whole evidence set to
+// the agent so the LLM itself issues the verdict (LLM-as-a-judge); that
+// signal would carry the model's confidence instead of a rule-derived value.
 package scoring
 
 import (
