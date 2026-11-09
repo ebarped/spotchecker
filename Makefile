@@ -69,9 +69,12 @@ turislab-scraper: ## Download the gosom Google Maps scraper into bin/
 serve: clean build ## Clean, rebuild everything (UI included) and serve on :$(PORT)
 	./$(BIN) --config $(CONFIG) --addr :$(PORT)
 
-clean: ## Remove the binary and the embedded UI build
+clean: ## Remove the binary, the embedded UI build and the local database
 	rm -f $(BIN)
 	rm -rf $(APP)/ui/build
+	# The seeder upserts, so a stale database would mix datasets (e.g.
+	# Madrid leftovers into a Lugo-only report); drop it on every clean.
+	rm -f $(APP)/turislab.db $(APP)/turislab.db-shm $(APP)/turislab.db-wal
 	# go:embed needs the folder to exist; restore the tracked placeholder
 	# that the next UI build replaces with the real bundle.
 	mkdir -p $(APP)/ui/build
