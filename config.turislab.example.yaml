@@ -223,7 +223,7 @@ server:
 # Agente conversacional
 # -----------------------------------------------------------------------------
 agent:
-  enabled: false                  # [PoC] false u opcional. Opciones: true | false. [Prod] true.
+  enabled: true                   # [PoC] true: el asistente queda montado en /api/agent/*. Opciones: true | false. [Prod] true.
   read_only: true                 # [PoC] true: solo consulta. Opciones: true | false. [Prod] false solo con tools de escritura y confirmación.
   max_turns: 12                   # Rondas máximas por petición. Opciones: 1-30.
   model:
