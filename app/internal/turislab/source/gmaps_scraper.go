@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
 )
@@ -173,12 +174,63 @@ func classifyStatus(raw string) placeStatus {
 	}
 }
 
+// bestPlace picks the scraped place that best matches the establishment
+// name. Google's first result is not always the place: for a closed POI the
+// search can answer with nearby places only, so the name is the reliable
+// discriminator. Scores the candidates by name similarity — exact match,
+// containment, then shared words — and falls back to the first result when
+// nothing matches.
+func bestPlace(estName string, places []gosomPlace) gosomPlace {
+	want := normalizeName(estName)
+	wantTokens := strings.Fields(want)
+
+	best, bestScore := places[0], 0
+	for _, place := range places {
+		have := normalizeName(place.Title)
+		score := 0
+		switch {
+		case have == want:
+			score = 100
+		case strings.Contains(have, want) || strings.Contains(want, have):
+			score = 80
+		default:
+			for _, token := range wantTokens {
+				if strings.Contains(have, token) {
+					score += 10
+				}
+			}
+		}
+		if score > bestScore {
+			best, bestScore = place, score
+		}
+	}
+	return best
+}
+
+// normalizeName lowercases, strips accents and punctuation and collapses
+// whitespace, so "Restaurante La Oca" and "Restaurante La Oca" compare equal
+// regardless of accents or separators.
+func normalizeName(name string) string {
+	var b strings.Builder
+	for _, r := range strings.ToLower(name) {
+		switch {
+		case unicode.IsLetter(r) || unicode.IsDigit(r) || unicode.IsSpace(r):
+			b.WriteRune(r)
+		}
+	}
+	return strings.Join(strings.Fields(b.String()), " ")
+}
+
 // Collect implements SignalSource.
 func (g *GMapsScraper) Collect(ctx context.Context, est *model.Establishment) ([]*model.Signal, error) {
 	now := time.Now()
 
-	// Build the search query.
-	query := strings.TrimSpace(fmt.Sprintf("%s %s %s", est.Name, est.Address, est.Municipality))
+	// Name + municipality: the address term confuses the search — for a
+	// permanently closed place Google can even drop the POI from the results
+	// and answer with nearby places only, so the name is the reliable
+	// discriminator. The -geo flag already biases the search toward the
+	// establishment's coordinates.
+	query := strings.TrimSpace(fmt.Sprintf("%s %s", est.Name, est.Municipality))
 
 	places, err := g.runScraper(ctx, est, query)
 	if err != nil {
@@ -192,8 +244,7 @@ func (g *GMapsScraper) Collect(ctx context.Context, est *model.Establishment) ([
 		return nil, nil
 	}
 
-	// Use the first result as the best match.
-	place := places[0]
+	place := bestPlace(est.Name, places)
 
 	var signals []*model.Signal
 

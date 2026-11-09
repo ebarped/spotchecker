@@ -266,3 +266,29 @@ func TestCollectFailingBinaryIsGraceful(t *testing.T) {
 		t.Error("source still healthy after a failed run")
 	}
 }
+
+// bestPlace must not follow Google's first result blindly: for a closed POI
+// the search can answer with nearby places only, so the scraped place is
+// picked by name similarity instead of rank order.
+func TestBestPlace(t *testing.T) {
+	places := []gosomPlace{
+		{Title: "Mercure Lugo Centro", Status: "69 €"},
+		{Title: "Eurostars Gran Hotel Lugo", Status: "54 €"},
+		{Title: "Restaurante La Oca", Status: "CERRADO"},
+		{Title: "Gran Café", Status: "Brunch"},
+	}
+
+	if got := bestPlace("Restaurante La Oca", places); got.Title != "Restaurante La Oca" {
+		t.Errorf("bestPlace picked %q, want the closed place", got.Title)
+	}
+
+	// Accents and separators must not break the match.
+	if got := bestPlace("Restaurante Canedo", places); got.Title != "Restaurante La Oca" {
+		t.Errorf("shared word falls back to the closest name, got %q", got.Title)
+	}
+
+	// A name with no shared word falls back to the first result.
+	if got := bestPlace("Paprica", places); got.Title != "Mercure Lugo Centro" {
+		t.Errorf("no match falls back to the first result, got %q", got.Title)
+	}
+}
