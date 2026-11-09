@@ -55,7 +55,8 @@ export interface Score {
 export interface QueueItem {
 	rank: number;
 	establishment: Establishment;
-	score: Score;
+	/** Null while the establishment waits for its first scan. */
+	score: Score | null;
 	primary_signals: unknown[];
 	scan_age_ns: number;
 }
@@ -157,7 +158,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
 export function filterQueue(queue: QueueItem[], filters: QueueFilters): QueueItem[] {
 	const q = (filters.q ?? '').trim().toLowerCase();
 	return queue.filter((item) => {
-		if (filters.tier && item.score.tier !== filters.tier) return false;
+		if (filters.tier && (!item.score || item.score.tier !== filters.tier)) return false;
 		if (filters.category && item.establishment.category !== filters.category) return false;
 		if (
 			filters.municipality &&
@@ -238,7 +239,7 @@ export function tierCounts(queue: QueueItem[]): Record<Tier, number> {
 		P3: 0,
 		collect_data: 0
 	};
-	for (const item of queue) counts[item.score.tier]++;
+	for (const item of queue) if (item.score) counts[item.score.tier]++;
 	return counts;
 }
 
@@ -248,7 +249,7 @@ export function statusCounts(queue: QueueItem[]): Record<SuggestedStatus, number
 		SuggestedStatus,
 		number
 	>;
-	for (const item of queue) counts[item.score.status]++;
+	for (const item of queue) if (item.score) counts[item.score.status]++;
 	return counts;
 }
 
@@ -271,12 +272,16 @@ function emptyCounts<K extends string>(keys: readonly K[]): Record<K, number> {
 function groupQueue<K extends string>(
 	queue: QueueItem[],
 	groupOf: (item: QueueItem) => string,
-	keyOf: (item: QueueItem) => K,
+	keyOf: (item: QueueItem) => K | undefined,
 	keys: readonly K[],
 	limit?: number
 ): GroupRow<K>[] {
 	const groups = new Map<string, GroupRow<K>>();
 	for (const item of queue) {
+		// Unscored items are not classified yet; they belong to no tier/status
+		// bucket, so the charts skip them until the first scan.
+		const key = keyOf(item);
+		if (!key) continue;
 		const label = groupOf(item);
 		let row = groups.get(label);
 		if (!row) {
@@ -284,7 +289,7 @@ function groupQueue<K extends string>(
 			groups.set(label, row);
 		}
 		row.total++;
-		row.counts[keyOf(item)]++;
+		row.counts[key]++;
 	}
 	const rows = [...groups.values()].sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
 	if (limit === undefined || rows.length <= limit) return rows;
@@ -300,12 +305,23 @@ function groupQueue<K extends string>(
 
 /** Establishments per municipality, split by tier (top `limit`, rest "Otros"). */
 export function tierRowsByMunicipality(queue: QueueItem[], limit = 8): GroupRow<Tier>[] {
-	return groupQueue(queue, (item) => item.establishment.municipality || 'Sin municipio', (item) => item.score.tier, TIERS, limit);
+	return groupQueue(
+		queue,
+		(item) => item.establishment.municipality || 'Sin municipio',
+		(item) => item.score?.tier,
+		TIERS,
+		limit
+	);
 }
 
 /** Establishments per category, split by suggested status. */
 export function statusRowsByCategory(queue: QueueItem[]): GroupRow<SuggestedStatus>[] {
-	return groupQueue(queue, (item) => CATEGORY_LABELS[item.establishment.category], (item) => item.score.status, STATUSES);
+	return groupQueue(
+		queue,
+		(item) => CATEGORY_LABELS[item.establishment.category],
+		(item) => item.score?.status,
+		STATUSES
+	);
 }
 
 /** Closure-risk histogram in 20-point buckets, worst bucket last. */
@@ -323,6 +339,7 @@ export function riskBuckets(queue: QueueItem[]): RiskBucket[] {
 		buckets.push({ label: `${from}–${to}%`, count: 0 });
 	}
 	for (const item of queue) {
+		if (!item.score) continue;
 		const risk = Math.min(Math.max(item.score.closure_risk, 0), 1);
 		const index = Math.min(Math.floor(risk * (edges.length - 1)), buckets.length - 1);
 		buckets[index].count++;

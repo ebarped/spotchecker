@@ -40,7 +40,12 @@ function score(overrides: Partial<Score> = {}): Score {
 	};
 }
 
-function item(rank: number, id: string, name: string, overrides: Partial<Score> = {}): QueueItem {
+function item(
+	rank: number,
+	id: string,
+	name: string,
+	overrides: Partial<Score> | null = {}
+): QueueItem {
 	return {
 		rank,
 		establishment: {
@@ -59,7 +64,7 @@ function item(rank: number, id: string, name: string, overrides: Partial<Score> 
 			notes: '',
 			id_generated: false
 		},
-		score: score({ establishment_id: id, ...overrides }),
+		score: overrides === null ? null : score({ establishment_id: id, ...overrides }),
 		primary_signals: [],
 		scan_age_ns: 0
 	};
@@ -100,6 +105,12 @@ describe('filterQueue', () => {
 
 	it('returns everything with empty filters', () => {
 		expect(filterQueue(queue, { tier: '', q: '' })).toHaveLength(4);
+	});
+
+	it('keeps unscored items only when no tier filter is set', () => {
+		const waiting = [item(1, 'rest-001', 'La Oca', null), ...queue];
+		expect(filterQueue(waiting, {})).toHaveLength(5);
+		expect(filterQueue(waiting, { tier: 'P0' })).toHaveLength(1);
 	});
 });
 
@@ -148,6 +159,14 @@ describe('tierCounts and statusCounts', () => {
 		expect(tierCounts(queue)).toEqual({ P0: 1, P1: 1, P2: 0, P3: 1, collect_data: 1 });
 	});
 
+	it('skips unscored items', () => {
+		const waiting = [item(1, 'a', 'A', null), ...queue];
+		expect(tierCounts(waiting)).toEqual({ P0: 1, P1: 1, P2: 0, P3: 1, collect_data: 1 });
+		const counts = statusCounts(waiting);
+		expect(counts.active).toBe(4);
+		expect(counts.unknown).toBe(0);
+	});
+
 	it('counts the queue per status, including the empty ones', () => {
 		const counts = statusCounts(queue);
 		expect(counts.active).toBe(4);
@@ -192,6 +211,13 @@ describe('grouped chart rows', () => {
 		const lonely = [item(1, 'a', 'A')];
 		lonely[0].establishment.municipality = '';
 		expect(tierRowsByMunicipality(lonely)[0].label).toBe('Sin municipio');
+	});
+
+	it('skips unscored items in the grouped charts', () => {
+		const mixed = [item(1, 'a', 'A', { tier: 'P0' }), item(2, 'b', 'B', null)];
+		const rows = tierRowsByMunicipality(mixed);
+		expect(rows).toHaveLength(1);
+		expect(rows[0].total).toBe(1);
 	});
 
 	it('folds the tail into a single Otros row when limited', () => {

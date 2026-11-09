@@ -362,20 +362,26 @@ func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.Signa
 		byID[sc.EstablishmentID] = sc
 	}
 
-	// Only include establishments that have been scored at least once; a
-	// fresh database shows an empty queue until the scanner runs.
+	// Unscored establishments ride along at the end of the queue with a nil
+	// score: the UI shows them as "waiting in the queue" until the scanner
+	// scores them.
 	type pair struct {
 		est *model.Establishment
 		sc  *model.Score
 	}
 	var pairs []pair
 	for _, e := range ests {
-		if sc, ok := byID[e.ID]; ok {
-			pairs = append(pairs, pair{e, sc})
-		}
+		pairs = append(pairs, pair{e, byID[e.ID]})
 	}
 	sort.SliceStable(pairs, func(i, j int) bool {
-		return pairs[i].sc.Priority > pairs[j].sc.Priority
+		ps, js := pairs[i].sc, pairs[j].sc
+		if (ps == nil) != (js == nil) {
+			return ps != nil
+		}
+		if ps == nil {
+			return pairs[i].est.Name < pairs[j].est.Name
+		}
+		return ps.Priority > js.Priority
 	})
 
 	now := time.Now()
@@ -388,31 +394,32 @@ func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.Signa
 			Rank:          i + 1,
 			Establishment: p.est,
 			Score:         p.sc,
-			ScanAge:       now.Sub(p.sc.ComputedAt),
+		}
+		if p.sc != nil {
+			item.ScanAge = now.Sub(p.sc.ComputedAt)
+			switch p.sc.Tier {
+			case model.TierP0:
+				summary.P0++
+			case model.TierP1:
+				summary.P1++
+			case model.TierP2:
+				summary.P2++
+			case model.TierP3:
+				summary.P3++
+			case model.TierCollectData:
+				summary.CollectData++
+			}
+			if p.sc.Status == model.StatusClosureConfirmed {
+				summary.ClosureConfirmed++
+			}
+			if p.sc.Confidence < 0.35 {
+				summary.LowConfidence++
+			}
+			if p.sc.EvidenceCount > 0 {
+				covered++
+			}
 		}
 		queue = append(queue, item)
-
-		switch p.sc.Tier {
-		case model.TierP0:
-			summary.P0++
-		case model.TierP1:
-			summary.P1++
-		case model.TierP2:
-			summary.P2++
-		case model.TierP3:
-			summary.P3++
-		case model.TierCollectData:
-			summary.CollectData++
-		}
-		if p.sc.Status == model.StatusClosureConfirmed {
-			summary.ClosureConfirmed++
-		}
-		if p.sc.Confidence < 0.35 {
-			summary.LowConfidence++
-		}
-		if p.sc.EvidenceCount > 0 {
-			covered++
-		}
 	}
 	if summary.Total > 0 {
 		summary.Coverage = float64(covered) / float64(summary.Total) * 100

@@ -239,9 +239,9 @@ func filterQueue(queue []model.QueueItem, params url.Values) []model.QueueItem {
 	municipality := params.Get("municipality")
 	q := strings.ToLower(params.Get("q"))
 
-	var filtered []model.QueueItem
+	var filtered = make([]model.QueueItem, 0, len(queue))
 	for _, item := range queue {
-		if tier != "" && string(item.Score.Tier) != tier {
+		if tier != "" && (item.Score == nil || string(item.Score.Tier) != tier) {
 			continue
 		}
 		if category != "" && string(item.Establishment.Category) != category {

@@ -277,22 +277,44 @@
 									</p>
 								</td>
 								<td class="px-4 py-3">
-									<span
-										class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold text-white"
-										style="background: {TIER_COLORS[item.score.tier]}"
-									>
-										{TIER_LABELS[item.score.tier]}
-									</span>
-								</td>
-								<td class="px-4 py-3 font-mono">{riskLabel(item.score.closure_risk)}</td>
-								<td class="px-4 py-3 font-mono">{Math.round(item.score.priority)}</td>
-								<td class="max-w-xs px-4 py-3 text-xs text-muted">
-									{STATUS_LABELS[item.score.status]} — {item.score.reason}
-									{#if item.score.conflict_detected}
-										<span class="text-partial">· conflicto entre fuentes</span>
+									{#if item.score}
+										<span
+											class="inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-semibold text-white"
+											style="background: {TIER_COLORS[item.score.tier]}"
+										>
+											{TIER_LABELS[item.score.tier]}
+										</span>
+									{:else}
+										<span
+											class="inline-flex items-center rounded-full bg-surface-2 px-2.5 py-0.5 text-xs font-medium text-muted"
+										>
+											En cola
+										</span>
 									{/if}
 								</td>
-								<td class="px-4 py-3 text-xs text-muted">{scanAge(item.scan_age_ns)}</td>
+								<td class="px-4 py-3 font-mono">
+									{item.score ? riskLabel(item.score.closure_risk) : '—'}
+								</td>
+								<td class="px-4 py-3 font-mono">
+									{item.score ? Math.round(item.score.priority) : '—'}
+								</td>
+								<td class="max-w-xs px-4 py-3 text-xs text-muted">
+									{#if item.score}
+										{STATUS_LABELS[item.score.status]} — {item.score.reason}
+										{#if item.score.conflict_detected}
+											<span class="text-partial">· conflicto entre fuentes</span>
+										{/if}
+									{:else}
+										Sin datos todavía
+									{/if}
+								</td>
+								<td class="px-4 py-3 text-xs text-muted">
+									{#if item.score}
+										{scanAge(item.scan_age_ns)}
+									{:else}
+										<span class="text-partial">Esperando en la cola</span>
+									{/if}
+								</td>
 								<td class="px-4 py-3 text-right">
 									<button
 										type="button"
