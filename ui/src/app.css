@@ -1,8 +1,5 @@
 @import 'tailwindcss';
 
-/* Dark canvas is the default; `dark:` utilities follow <html data-theme>. */
-@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
-
 @theme {
 	--font-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
 	--font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
@@ -31,35 +28,33 @@
 	--color-overlay: var(--gd-overlay);
 }
 
-/* ------------------------------------------------------------------ themes */
+/* ------------------------------------------------------------------ theme */
 
-:root,
-:root[data-theme='dark'] {
-	color-scheme: dark;
+:root {
+	color-scheme: light;
 
-	/* Grafana-dark canvas with solid one-step-lighter cards. */
-	--gd-bg: #131418;
-	--gd-surface: #1b1d23;
-	--gd-surface-2: #22252c;
-	--gd-line: rgb(255 255 255 / 0.08);
-	--gd-line-strong: rgb(255 255 255 / 0.16);
-	--gd-ink: #f2f2f0;
-	--gd-muted: #a9aeb8;
-	--gd-faint: #7d828c;
-	--gd-accent: #4ea8dc;
-	--gd-accent-2: #e8875e;
-	--gd-accent-3: #e6bc6a;
-	--gd-overlay: #22252c;
+	/* Warm paper canvas with solid white cards. */
+	--gd-bg: #f4f1ea;
+	--gd-surface: #ffffff;
+	--gd-surface-2: #faf8f4;
+	--gd-line: rgb(27 29 35 / 0.1);
+	--gd-line-strong: rgb(27 29 35 / 0.2);
+	--gd-ink: #2a2622;
+	--gd-muted: #6d675f;
+	--gd-faint: #a29b91;
+	--gd-accent: #2a6e9e;
+	--gd-accent-2: #b85c38;
+	--gd-accent-3: #8a6428;
+	--gd-overlay: #ffffff;
 
-	/* Faint warm embers keep the flat canvas from feeling dead. */
-	--blob-opacity: 0.18;
+	/* Aurora washed into pastel morning light. */
+	--blob-opacity: 0.35;
 	--blob-blur: 110px;
-	--blob-a: #3a6ea5;
-	--blob-b: #b85c38;
-	--blob-c: #8a6428;
-	--blob-d: #e8875e;
-	--glass-shadow:
-		0 1px 0 0 rgb(255 255 255 / 0.03) inset, 0 12px 32px -16px rgb(0 0 0 / 0.55);
+	--blob-a: #a9c4e4;
+	--blob-b: #efc3a8;
+	--blob-c: #e6d5a8;
+	--blob-d: #f2c4ae;
+	--glass-shadow: 0 1px 2px rgb(27 29 35 / 0.06), 0 12px 28px -18px rgb(27 29 35 / 0.35);
 }
 
 /* --------------------------------------------------------------- base layer */
