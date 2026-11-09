@@ -23,6 +23,8 @@ export interface ChartPalette {
 	skipped: string;
 	/** Seasonal accent (theme dependent, unlike the status palette). */
 	accent3: string;
+	/** The warm secondary accent: attention without danger (collect_data). */
+	accent2: string;
 }
 
 /** The font stack is fixed; only colors differ per theme. */
@@ -45,7 +47,8 @@ export function chartPalette(): ChartPalette {
 			empty: '#7fa8db',
 			error: '#e58f8a',
 			skipped: '#8b919c',
-			accent3: '#e6bc6a'
+			accent3: '#e6bc6a',
+			accent2: '#b85c38'
 		};
 	}
 	const style = getComputedStyle(document.documentElement);
@@ -64,7 +67,8 @@ export function chartPalette(): ChartPalette {
 		empty: read('--color-empty'),
 		error: read('--color-error'),
 		skipped: read('--color-skipped'),
-		accent3: read('--gd-accent-3')
+		accent3: read('--gd-accent-3'),
+		accent2: read('--gd-accent-2')
 	};
 }
 

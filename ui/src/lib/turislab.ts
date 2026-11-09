@@ -131,7 +131,7 @@ export const TIER_COLORS: Record<Tier, string> = {
 	P1: 'var(--color-partial)',
 	P2: 'var(--color-empty)',
 	P3: 'var(--color-ok)',
-	collect_data: 'var(--color-skipped)',
+	collect_data: 'var(--color-accent-2)',
 	por_procesar: 'var(--color-faint)'
 };
 

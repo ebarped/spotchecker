@@ -15,7 +15,7 @@
 		P1: pal.partial,
 		P2: pal.empty,
 		P3: pal.ok,
-		collect_data: pal.skipped,
+		collect_data: pal.accent2,
 		por_procesar: pal.faint
 	}));
 

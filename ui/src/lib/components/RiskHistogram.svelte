@@ -29,7 +29,9 @@
 			{
 				type: 'bar',
 				barWidth: '52%',
-				itemStyle: { color: pal.ko, borderRadius: [4, 4, 0, 0] },
+				// Neutral fill: the histogram describes the distribution, and a
+				// wall of red reads as danger even in the low buckets.
+				itemStyle: { color: pal.muted, borderRadius: [4, 4, 0, 0] },
 				data: buckets.map((bucket) => bucket.count)
 			}
 		]
