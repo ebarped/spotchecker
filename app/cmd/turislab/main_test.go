@@ -1,9 +1,11 @@
 package main
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/datadope/turislab-doctor/internal/turislab/config"
+	"github.com/datadope/turislab-doctor/internal/turislab/model"
 	"github.com/datadope/turislab-doctor/internal/turislab/scoring"
 )
 
@@ -96,5 +98,44 @@ func TestScoringConfigMapsTuningAndTiers(t *testing.T) {
 	}
 	if tc.MinConfidenceP0 != 0.6 || tc.CollectDataConfidence != 0.35 {
 		t.Errorf("tier confidences = %v/%v", tc.MinConfidenceP0, tc.CollectDataConfidence)
+	}
+}
+
+// The waiting tail of the queue must follow the upcoming scan order: the
+// scanner walks the list starting right after the cursor, so rotating from
+// cursor+1 puts the next target first. Scored establishments never appear
+// in the waiting tail.
+func TestWaitingOrderFollowsTheScanCursor(t *testing.T) {
+	ests := []*model.Establishment{
+		{ID: "a"}, {ID: "b"}, {ID: "c"}, {ID: "d"}, {ID: "e"},
+	}
+	byID := map[string]*model.Score{"b": {EstablishmentID: "b"}, "e": {EstablishmentID: "e"}}
+
+	ids := func(list []*model.Establishment) []string {
+		out := make([]string, 0, len(list))
+		for _, e := range list {
+			out = append(out, e.ID)
+		}
+		return out
+	}
+
+	// Cursor on "c": the scan continues at "d", wraps to "a", skips "b"
+	// (scored) and "e" (scored); "c" itself comes back last, after the
+	// rotation wraps around.
+	got := waitingOrder(ests, byID, "c")
+	if want := []string{"d", "a", "c"}; !slices.Equal(ids(got), want) {
+		t.Errorf("waitingOrder(cursor=c) = %v, want %v", ids(got), want)
+	}
+
+	// Nothing scanned yet: natural order minus the scored ones.
+	got = waitingOrder(ests, byID, "")
+	if want := []string{"a", "c", "d"}; !slices.Equal(ids(got), want) {
+		t.Errorf("waitingOrder(no cursor) = %v, want %v", ids(got), want)
+	}
+
+	// Unknown cursor: same as none.
+	got = waitingOrder(ests, byID, "zzz")
+	if want := []string{"a", "c", "d"}; !slices.Equal(ids(got), want) {
+		t.Errorf("waitingOrder(unknown cursor) = %v, want %v", ids(got), want)
 	}
 }

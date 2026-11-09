@@ -347,6 +347,44 @@ func refreshLoop(ctx context.Context, db *store.SQLiteStore, srcs []source.Signa
 
 // buildReport assembles the full report snapshot: queue ordered by priority,
 // summary counts and source statuses.
+// waitingOrder orders the unscored establishments by their upcoming scan
+// position. The scanner walks the list (ordered by name) starting right
+// after the cursor — the id of the last scanned establishment — so rotating
+// the list from cursor+1 and keeping the unscored ones gives the queue the
+// order in which they will be processed. An empty cursor (nothing scanned
+// yet) keeps the natural order.
+func waitingOrder(ests []*model.Establishment, byID map[string]*model.Score, cursor string) []*model.Establishment {
+	if cursor == "" || len(ests) == 0 {
+		var waiting []*model.Establishment
+		for _, e := range ests {
+			if byID[e.ID] == nil {
+				waiting = append(waiting, e)
+			}
+		}
+		return waiting
+	}
+	start := -1
+	for i, e := range ests {
+		if e.ID == cursor {
+			start = (i + 1) % len(ests)
+			break
+		}
+	}
+	rotated := ests
+	if start > 0 {
+		rotated = make([]*model.Establishment, 0, len(ests))
+		rotated = append(rotated, ests[start:]...)
+		rotated = append(rotated, ests[:start]...)
+	}
+	var waiting []*model.Establishment
+	for _, e := range rotated {
+		if byID[e.ID] == nil {
+			waiting = append(waiting, e)
+		}
+	}
+	return waiting
+}
+
 func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.SignalSource, scanner *scan.Scanner) *model.Report {
 	ests, err := db.ListEstablishments(ctx)
 	if err != nil {
@@ -362,70 +400,71 @@ func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.Signa
 		byID[sc.EstablishmentID] = sc
 	}
 
-	// Unscored establishments ride along at the end of the queue with a nil
-	// score: the UI shows them as "waiting in the queue" until the scanner
-	// scores them.
+	// Scored establishments lead the queue, worst priority first. Unscored
+	// ones ride along at the end with a nil score — the UI shows them as
+	// waiting — and their order is the upcoming scan order: the cursor
+	// marks the last scanned id, so rotating the list right after it puts
+	// the next target first.
+	cursor, _ := db.GetCursor(ctx)
 	type pair struct {
 		est *model.Establishment
 		sc  *model.Score
 	}
-	var pairs []pair
+	var scored []pair
 	for _, e := range ests {
-		pairs = append(pairs, pair{e, byID[e.ID]})
+		if sc := byID[e.ID]; sc != nil {
+			scored = append(scored, pair{e, sc})
+		}
 	}
-	sort.SliceStable(pairs, func(i, j int) bool {
-		ps, js := pairs[i].sc, pairs[j].sc
-		if (ps == nil) != (js == nil) {
-			return ps != nil
-		}
-		if ps == nil {
-			return pairs[i].est.Name < pairs[j].est.Name
-		}
-		return ps.Priority > js.Priority
+	sort.SliceStable(scored, func(i, j int) bool {
+		return scored[i].sc.Priority > scored[j].sc.Priority
 	})
 
 	now := time.Now()
 	var queue []model.QueueItem
-	summary := model.ReportSummary{Total: len(pairs)}
+	summary := model.ReportSummary{Total: len(ests)}
 	covered := 0
 
-	for i, p := range pairs {
+	rank := 0
+	for _, p := range scored {
+		rank++
 		item := model.QueueItem{
-			Rank:          i + 1,
+			Rank:          rank,
 			Establishment: p.est,
 			Score:         p.sc,
+			ScanAge:       now.Sub(p.sc.ComputedAt),
 		}
-		if p.sc != nil {
-			item.ScanAge = now.Sub(p.sc.ComputedAt)
-			switch p.sc.Tier {
-			case model.TierP0:
-				summary.P0++
-			case model.TierP1:
-				summary.P1++
-			case model.TierP2:
-				summary.P2++
-			case model.TierP3:
-				summary.P3++
-			case model.TierCollectData:
-				summary.CollectData++
-			}
-			if p.sc.Status == model.StatusClosureConfirmed {
-				summary.ClosureConfirmed++
-			}
-			if p.sc.Confidence < 0.35 {
-				summary.LowConfidence++
-			}
-			if p.sc.EvidenceCount > 0 {
-				covered++
-			}
+		switch p.sc.Tier {
+		case model.TierP0:
+			summary.P0++
+		case model.TierP1:
+			summary.P1++
+		case model.TierP2:
+			summary.P2++
+		case model.TierP3:
+			summary.P3++
+		case model.TierCollectData:
+			summary.CollectData++
+		}
+		if p.sc.Status == model.StatusClosureConfirmed {
+			summary.ClosureConfirmed++
+		}
+		if p.sc.Confidence < 0.35 {
+			summary.LowConfidence++
+		}
+		if p.sc.EvidenceCount > 0 {
+			covered++
 		}
 		queue = append(queue, item)
+	}
+	for _, e := range waitingOrder(ests, byID, cursor) {
+		rank++
+		queue = append(queue, model.QueueItem{Rank: rank, Establishment: e})
 	}
 	if summary.Total > 0 {
 		summary.Coverage = float64(covered) / float64(summary.Total) * 100
 	}
 
-	cursor, _ := db.GetCursor(ctx)
 	status := scanner.Status()
 
 	var sources []model.SourceStatus
