@@ -18,6 +18,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 
 	"github.com/datadope/turislab-doctor/internal/logx"
+	"github.com/datadope/turislab-doctor/internal/turislab/agent"
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
 	"github.com/datadope/turislab-doctor/internal/turislab/scan"
 )
@@ -34,6 +35,9 @@ type Server struct {
 	http    atomic.Pointer[http.Server]
 	scanner scannerIface
 	metrics http.Handler
+	// agent, when set, exposes /api/agent/info, /api/agent/tools and
+	// /api/agent/chat.
+	agent *agent.Service
 }
 
 type Option func(*Server)
@@ -41,6 +45,13 @@ type Option func(*Server)
 func WithScanner(s scannerIface) Option {
 	return func(srv *Server) {
 		srv.scanner = s
+	}
+}
+
+// WithAgent mounts the inspection assistant endpoints.
+func WithAgent(a *agent.Service) Option {
+	return func(srv *Server) {
+		srv.agent = a
 	}
 }
 
@@ -169,6 +180,15 @@ func (s *Server) Handler() http.Handler {
 				},
 			})
 		})
+
+		if s.agent != nil {
+			r.Get("/agent/info", s.agent.HandleInfo)
+			r.Get("/agent/tools", s.agent.HandleTools)
+			// A chat turn runs several model rounds and tool calls: it gets
+			// its own, much larger deadline than the rest of the API.
+			r.With(middleware.Timeout(agent.ChatTimeout+30*time.Second)).
+				Post("/agent/chat", s.agent.HandleChat)
+		}
 
 		// Unknown /api endpoints answer JSON 404 instead of falling through
 		// to the single page app, which would answer HTML.

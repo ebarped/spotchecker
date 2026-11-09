@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,8 +12,10 @@ import (
 	"time"
 
 	"github.com/datadope/turislab-doctor/internal/logx"
+	"github.com/datadope/turislab-doctor/internal/turislab/agent"
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
 	"github.com/datadope/turislab-doctor/internal/turislab/scan"
+	adkmodel "google.golang.org/adk/v2/model"
 )
 
 // decodeJSON unmarshals a handler response; a body that does not parse is a
@@ -323,5 +326,75 @@ func TestUnknownAPIIsJSON(t *testing.T) {
 	}
 	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
 		t.Errorf("content-type = %q, want application/json", ct)
+	}
+}
+
+// agentTestService builds a service whose model is never reachable: the
+// route-level tests only exercise info, the catalog and the guards.
+func agentTestService(t *testing.T) *agent.Service {
+	t.Helper()
+	svc, err := agent.New(agent.Config{Model: agent.ModelConfig{Provider: "openai", Name: "test"}},
+		logx.New(&strings.Builder{}),
+		agent.WithModelFactory(func(context.Context) (adkmodel.LLM, error) {
+			return nil, errors.New("model not available in this test")
+		}))
+	if err != nil {
+		t.Fatalf("agent.New: %v", err)
+	}
+	return svc
+}
+
+// TestAgentRoutesMounted checks the agent endpoints: info, the tool catalog
+// and the pre-scan 503 of the chat.
+func TestAgentRoutesMounted(t *testing.T) {
+	srv := newTestServer(t, WithAgent(agentTestService(t)))
+
+	rec := get(t, srv, "/api/agent/info")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/agent/info: status %d, want 200", rec.Code)
+	}
+	type infoPayload struct {
+		Enabled     bool     `json:"enabled"`
+		Model       string   `json:"model"`
+		Suggestions []string `json:"suggestions"`
+	}
+	info := decodeJSON[infoPayload](t, rec.Body.Bytes())
+	if !info.Enabled || info.Model != "test" || len(info.Suggestions) == 0 {
+		t.Errorf("info = %+v, want enabled with the model and default suggestions", info)
+	}
+
+	rec = get(t, srv, "/api/agent/tools")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/agent/tools: status %d, want 200", rec.Code)
+	}
+	type catalogPayload struct {
+		Builtin []struct {
+			Key   string `json:"key"`
+			Tools []struct {
+				Name string `json:"name"`
+			} `json:"tools"`
+		} `json:"builtin"`
+		External []struct{} `json:"external"`
+	}
+	catalog := decodeJSON[catalogPayload](t, rec.Body.Bytes())
+	if len(catalog.Builtin) != 1 || len(catalog.Builtin[0].Tools) == 0 || catalog.External == nil {
+		t.Errorf("catalog = %+v, want the report tools and a non-nil external list", catalog)
+	}
+
+	rec = httptest.NewRecorder()
+	srv.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/agent/chat",
+		strings.NewReader(`{"message":"hola"}`)))
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("chat before the report: status %d, want 503", rec.Code)
+	}
+}
+
+// TestAgentDisabledByDefault keeps the endpoints out of the API when the
+// agent is not configured.
+func TestAgentDisabledByDefault(t *testing.T) {
+	srv := newTestServer(t)
+
+	if rec := get(t, srv, "/api/agent/info"); rec.Code != http.StatusNotFound {
+		t.Errorf("GET /api/agent/info without the agent: status %d, want 404", rec.Code)
 	}
 }

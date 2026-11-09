@@ -32,6 +32,7 @@
 	"dependencies": {
 		"@xyflow/svelte": "^1.7.0",
 		"dompurify": "^3.4.17",
+		"echarts": "^6.1.0",
 		"marked": "^18.1.2"
 	}
 }

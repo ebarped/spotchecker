@@ -200,3 +200,150 @@ export function pocCriterionMet(queue: QueueItem[], closedIds: string[]): boolea
 		return item !== undefined && item.rank <= 3;
 	});
 }
+
+// ─── KPI / chart helpers ─────────────────────────────────────────────────────
+
+/** Human-readable status metadata: label plus the design-system colour. */
+export interface StatusMeta {
+	label: string;
+	color: string;
+}
+
+/** Suggested statuses in display order (worst first). */
+export const STATUSES: SuggestedStatus[] = [
+	'closure_confirmed',
+	'closure_suspected',
+	'closed_temporarily',
+	'seasonal',
+	'active',
+	'unknown'
+];
+
+/** Status metadata for badges, charts and KPI chips. */
+export const STATUS_META: Record<SuggestedStatus, StatusMeta> = {
+	closure_confirmed: { label: 'Cierre confirmado', color: 'var(--color-ko)' },
+	closure_suspected: { label: 'Cierre sospechado', color: 'var(--color-partial)' },
+	closed_temporarily: { label: 'Cierre temporal', color: 'var(--color-empty)' },
+	seasonal: { label: 'Estacional', color: 'var(--color-accent-3)' },
+	active: { label: 'Activo', color: 'var(--color-ok)' },
+	unknown: { label: 'Sin datos', color: 'var(--color-skipped)' }
+};
+
+/** Counts the queue per tier. */
+export function tierCounts(queue: QueueItem[]): Record<Tier, number> {
+	const counts: Record<Tier, number> = {
+		P0: 0,
+		P1: 0,
+		P2: 0,
+		P3: 0,
+		collect_data: 0
+	};
+	for (const item of queue) counts[item.score.tier]++;
+	return counts;
+}
+
+/** Counts the queue per suggested operational status. */
+export function statusCounts(queue: QueueItem[]): Record<SuggestedStatus, number> {
+	const counts = Object.fromEntries(STATUSES.map((s) => [s, 0])) as Record<
+		SuggestedStatus,
+		number
+	>;
+	for (const item of queue) counts[item.score.status]++;
+	return counts;
+}
+
+/** One row of a grouped chart: a label, its total and the per-key breakdown. */
+export interface GroupRow<K extends string> {
+	label: string;
+	total: number;
+	counts: Record<K, number>;
+}
+
+function emptyCounts<K extends string>(keys: readonly K[]): Record<K, number> {
+	return Object.fromEntries(keys.map((key) => [key, 0])) as Record<K, number>;
+}
+
+/**
+ * Groups the queue by an arbitrary key of the establishment and counts one
+ * dimension inside each group. The rows come sorted by total (worst first)
+ * and, when `limit` is set, the tail is folded into a single "Otros" row.
+ */
+function groupQueue<K extends string>(
+	queue: QueueItem[],
+	groupOf: (item: QueueItem) => string,
+	keyOf: (item: QueueItem) => K,
+	keys: readonly K[],
+	limit?: number
+): GroupRow<K>[] {
+	const groups = new Map<string, GroupRow<K>>();
+	for (const item of queue) {
+		const label = groupOf(item);
+		let row = groups.get(label);
+		if (!row) {
+			row = { label, total: 0, counts: emptyCounts(keys) };
+			groups.set(label, row);
+		}
+		row.total++;
+		row.counts[keyOf(item)]++;
+	}
+	const rows = [...groups.values()].sort((a, b) => b.total - a.total || a.label.localeCompare(b.label));
+	if (limit === undefined || rows.length <= limit) return rows;
+
+	const kept = rows.slice(0, limit);
+	const other: GroupRow<K> = { label: 'Otros', total: 0, counts: emptyCounts(keys) };
+	for (const row of rows.slice(limit)) {
+		other.total += row.total;
+		for (const key of keys) other.counts[key] += row.counts[key];
+	}
+	return [...kept, other];
+}
+
+/** Establishments per municipality, split by tier (top `limit`, rest "Otros"). */
+export function tierRowsByMunicipality(queue: QueueItem[], limit = 8): GroupRow<Tier>[] {
+	return groupQueue(queue, (item) => item.establishment.municipality || 'Sin municipio', (item) => item.score.tier, TIERS, limit);
+}
+
+/** Establishments per category, split by suggested status. */
+export function statusRowsByCategory(queue: QueueItem[]): GroupRow<SuggestedStatus>[] {
+	return groupQueue(queue, (item) => CATEGORY_LABELS[item.establishment.category], (item) => item.score.status, STATUSES);
+}
+
+/** Closure-risk histogram in 20-point buckets, worst bucket last. */
+export interface RiskBucket {
+	label: string;
+	count: number;
+}
+
+export function riskBuckets(queue: QueueItem[]): RiskBucket[] {
+	const edges = [0, 0.2, 0.4, 0.6, 0.8, 1];
+	const buckets: RiskBucket[] = [];
+	for (let i = 0; i < edges.length - 1; i++) {
+		const from = Math.round(edges[i] * 100);
+		const to = Math.round(edges[i + 1] * 100);
+		buckets.push({ label: `${from}–${to}%`, count: 0 });
+	}
+	for (const item of queue) {
+		const risk = Math.min(Math.max(item.score.closure_risk, 0), 1);
+		const index = Math.min(Math.floor(risk * (edges.length - 1)), buckets.length - 1);
+		buckets[index].count++;
+	}
+	return buckets;
+}
+
+/** Establishments with at least one piece of evidence behind their score. */
+export function coveredCount(report: TurislabReport): number {
+	return Math.round((report.summary.coverage_pct / 100) * report.summary.total);
+}
+
+/** Formats an RFC3339 timestamp for the UI. */
+export function formatTime(iso: string): string {
+	const date = new Date(iso);
+	if (Number.isNaN(date.getTime())) return iso;
+	return date.toLocaleString('es-ES', {
+		year: 'numeric',
+		month: 'short',
+		day: 'numeric',
+		hour: '2-digit',
+		minute: '2-digit'
+	});
+}

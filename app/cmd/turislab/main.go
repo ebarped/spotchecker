@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/datadope/turislab-doctor/internal/logx"
+	"github.com/datadope/turislab-doctor/internal/turislab/agent"
 	"github.com/datadope/turislab-doctor/internal/turislab/config"
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
 	"github.com/datadope/turislab-doctor/internal/turislab/scan"
@@ -148,8 +149,21 @@ func main() {
 	} else {
 		log.Info("server", "serving the embedded web UI")
 	}
-	srv := server.New(uiFS, log, server.WithScanner(scanner))
-	go refreshLoop(ctx, db, srcs, scanner, srv, log)
+	// The inspection assistant is mounted only when the configuration
+	// enables it; without it the UI hides the agent tab.
+	var agentSvc *agent.Service
+	opts := []server.Option{server.WithScanner(scanner)}
+	if cfg.Agent.Enabled {
+		agentSvc, err = agent.New(agentConfig(cfg.Agent), log)
+		if err != nil {
+			log.Error("agent", "%v", err)
+			os.Exit(1)
+		}
+		defer func() { _ = agentSvc.Close() }()
+		opts = append(opts, server.WithAgent(agentSvc))
+	}
+	srv := server.New(uiFS, log, opts...)
+	go refreshLoop(ctx, db, srcs, scanner, srv, agentSvc, log)
 
 	lnAddr := cfg.Server.Addr
 	if *addr != "" {
@@ -166,6 +180,9 @@ func main() {
 		_ = srv.Close()
 	}()
 
+	if cfg.Agent.Enabled {
+		log.Info("server", "agent mounted on %s/api/agent/chat", ln.Addr())
+	}
 	if err := srv.Serve(ln); err != nil {
 		log.Error("", "server: %v", err)
 		os.Exit(1)
@@ -280,13 +297,37 @@ func scoringConfig(cfg config.Config) scoring.ScoringConfig {
 }
 
 // refreshLoop rebuilds the in-memory report every 10 seconds from the store.
-func refreshLoop(ctx context.Context, db *store.SQLiteStore, srcs []source.SignalSource, scanner *scan.Scanner, srv *server.Server, log *logx.Logger) {
+// agentConfig maps the YAML agent section onto the agent package's own
+// configuration type, so the package stays decoupled from config.
+func agentConfig(cfg config.AgentConfig) agent.Config {
+	mcp := make([]agent.MCPServer, 0, len(cfg.MCP))
+	for _, server := range cfg.MCP {
+		mcp = append(mcp, agent.MCPServer{Name: server.Name, URL: server.URL, Headers: server.Headers})
+	}
+	return agent.Config{
+		MaxTurns: cfg.MaxTurns,
+		Model: agent.ModelConfig{
+			Provider:  cfg.Model.Provider,
+			Name:      cfg.Model.Name,
+			BaseURL:   cfg.Model.BaseURL,
+			APIKeyEnv: cfg.Model.APIKeyEnv,
+		},
+		MCP:         mcp,
+		Suggestions: cfg.Suggestions,
+	}
+}
+
+func refreshLoop(ctx context.Context, db *store.SQLiteStore, srcs []source.SignalSource, scanner *scan.Scanner, srv *server.Server, agentSvc *agent.Service, log *logx.Logger) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	build := func() {
 		rep := buildReport(ctx, db, srcs, scanner)
 		srv.SetReport(rep)
+		// The assistant answers from the same snapshot the UI shows.
+		if agentSvc != nil {
+			agentSvc.SetReport(rep)
+		}
 	}
 	build()
 
