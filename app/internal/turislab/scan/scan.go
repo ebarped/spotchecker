@@ -247,10 +247,18 @@ func (s *Scanner) ScanOne(ctx context.Context, establishmentID string) error {
 }
 
 func (s *Scanner) RunOnce(ctx context.Context) error {
+	// The one-pass run counts as activity too: /api/scan/status and the
+	// UI's poll loop follow the flag to show the pass live.
+	s.running.Store(true)
+	defer s.running.Store(false)
+
 	ests, err := s.store.ListEstablishments(ctx)
 	if err != nil {
 		return err
 	}
+	started := time.Now()
+	s.log.Step("scan", "pase único: %d establecimiento(s)", len(ests))
+	var failures int
 	for i, e := range ests {
 		if i > 0 && s.cfg.PauseBetween > 0 {
 			select {
@@ -260,9 +268,12 @@ func (s *Scanner) RunOnce(ctx context.Context) error {
 			}
 		}
 		if err := s.ScanOne(ctx, e.ID); err != nil {
+			failures++
 			s.log.Warn("scan", "RunOnce error on %s: %v", e.ID, err)
 		}
 	}
+	s.log.Info("scan", "pase completado en %.1fs · %d establecimientos · %d fallos — el scanner queda a la espera de re-escaneos manuales",
+		time.Since(started).Seconds(), len(ests), failures)
 	return nil
 }
 

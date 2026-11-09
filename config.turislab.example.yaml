@@ -45,6 +45,7 @@ input:
 # -----------------------------------------------------------------------------
 scan:
   mode: sequential                # [PoC] sequential = un establecimiento por tick. Opciones: sequential | parallel. [Prod] parallel con límites por fuente.
+  repeat: false                   # [PoC] false = un pase al arrancar y el scanner se queda quieto; los re-escaneos son manuales (botón de la UI). Opciones: true = bucle continuo cada trigger_interval.
   trigger_interval: 1m            # [PoC] 1m para no saturar APIs públicas. Opciones: "30s", "1m", "5m", "1h". [Prod] 5-15m o cron diario según volumen.
   targets_per_tick: 1             # [PoC] 1 establecimiento. Opciones: 1-100. [Prod] 10-50 solo si las fuentes lo permiten.
   jitter: 0.1                     # Variación aleatoria para no ir en cadencia perfecta. Opciones: 0.0-0.5. [Prod] 0.1-0.2.

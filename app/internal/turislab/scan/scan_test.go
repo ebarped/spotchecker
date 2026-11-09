@@ -251,3 +251,53 @@ func TestStatusReflectsActivity(t *testing.T) {
 		t.Error("running = true before Start, want false")
 	}
 }
+
+// A one-pass run counts as activity: the running flag is up while the pass
+// is in flight and back down once it completes, so /api/scan/status and the
+// UI's poll loop can follow it.
+func TestRunOnceTogglesTheRunningFlag(t *testing.T) {
+	s, ctx := setup(t)
+	seedEstablishments(t, s, ctx)
+
+	release := make(chan struct{})
+	blocking := &gateSource{gate: release}
+	sc := newScanner(s, blocking)
+
+	done := make(chan error, 1)
+	go func() { done <- sc.RunOnce(ctx) }()
+
+	// Wait until the pass is running, then confirm the flag is visible.
+	deadline := time.Now().Add(5 * time.Second)
+	for !sc.Status().Running && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if !sc.Status().Running {
+		t.Fatal("the pass never reported running")
+	}
+	close(release)
+	if err := <-done; err != nil {
+		t.Fatalf("RunOnce: %v", err)
+	}
+	if sc.Status().Running {
+		t.Error("running = true after RunOnce, want false")
+	}
+}
+
+// gateSource blocks every Collect until its gate closes, giving the test a
+// window to observe the running flag mid-pass.
+type gateSource struct {
+	gate chan struct{}
+}
+
+func (g *gateSource) Name() string               { return "gate" }
+func (g *gateSource) Enabled() bool              { return true }
+func (g *gateSource) Health() model.SourceStatus { return model.SourceStatus{Name: g.Name()} }
+
+func (g *gateSource) Collect(ctx context.Context, _ *model.Establishment) ([]*model.Signal, error) {
+	select {
+	case <-g.gate:
+		return nil, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}

@@ -133,7 +133,14 @@ func main() {
 		return
 	}
 
-	go scanner.Start(ctx)
+	// repeat keeps the ticker looping forever; the default is a single
+	// pass over the whole list at startup, after which the scanner rests
+	// and only explicit re-scans (the UI's refresh endpoint) wake it up.
+	if cfg.Scan.Repeat {
+		go scanner.Start(ctx)
+	} else {
+		go func() { _ = scanner.RunOnce(ctx) }()
+	}
 
 	// The web UI ships inside the binary. --static-dir (or server.static_dir)
 	// serves a build from disk instead, so UI changes can be tried without

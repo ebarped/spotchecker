@@ -69,6 +69,7 @@ type InputConfig struct {
 
 type ScanConfig struct {
 	Mode                       string   `yaml:"mode"`
+	Repeat                     bool     `yaml:"repeat"`
 	TriggerInterval            Duration `yaml:"trigger_interval"`
 	TargetsPerTick             int      `yaml:"targets_per_tick"`
 	Jitter                     float64  `yaml:"jitter"`
