@@ -24,8 +24,8 @@
 		P1: 'P1 · Visitar pronto',
 		P2: 'P2 · Programar',
 		P3: 'P3 · Vigilar',
-		collect_data: 'Recoger datos',
-		por_procesar: 'Por procesar'
+		collect_data: 'Datos insuf.',
+		por_procesar: 'Sin escanear'
 	};
 
 	// Six municipalities fit the fixed 250px chart with two-line labels;

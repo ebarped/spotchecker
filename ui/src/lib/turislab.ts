@@ -121,8 +121,8 @@ export const TIER_LABELS: Record<Tier, string> = {
 	P1: 'P1 · Visitar pronto',
 	P2: 'P2 · Programar visita',
 	P3: 'P3 · Vigilar',
-	collect_data: 'Recoger datos',
-	por_procesar: 'Por procesar'
+	collect_data: 'Datos insuficientes',
+	por_procesar: 'Sin escanear'
 };
 
 /** Tier accent colours, mapped onto the design-system palette. */

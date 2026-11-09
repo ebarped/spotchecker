@@ -26,8 +26,8 @@
 		P1: 'P1',
 		P2: 'P2',
 		P3: 'P3',
-		collect_data: 'Recoger datos',
-		por_procesar: 'Por procesar'
+		collect_data: 'Datos insuf.',
+		por_procesar: 'Sin escanear'
 	};
 
 	const data = $derived(
