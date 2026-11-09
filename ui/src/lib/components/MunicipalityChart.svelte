@@ -15,7 +15,8 @@
 		P1: pal.partial,
 		P2: pal.empty,
 		P3: pal.ok,
-		collect_data: pal.skipped
+		collect_data: pal.skipped,
+		por_procesar: pal.faint
 	}));
 
 	const SHORT: Record<Tier, string> = {
@@ -23,7 +24,8 @@
 		P1: 'P1 · Visitar pronto',
 		P2: 'P2 · Programar',
 		P3: 'P3 · Vigilar',
-		collect_data: 'Recoger datos'
+		collect_data: 'Recoger datos',
+		por_procesar: 'Por procesar'
 	};
 
 	// Six municipalities fit the fixed 250px chart with two-line labels;

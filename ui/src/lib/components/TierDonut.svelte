@@ -15,7 +15,8 @@
 		P1: pal.partial,
 		P2: pal.empty,
 		P3: pal.ok,
-		collect_data: pal.skipped
+		collect_data: pal.skipped,
+		por_procesar: pal.faint
 	}));
 
 	const counts = $derived(tierCounts(report.queue));
@@ -25,7 +26,8 @@
 		P1: 'P1',
 		P2: 'P2',
 		P3: 'P3',
-		collect_data: 'Recoger datos'
+		collect_data: 'Recoger datos',
+		por_procesar: 'Por procesar'
 	};
 
 	const data = $derived(

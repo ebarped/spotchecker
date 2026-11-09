@@ -113,6 +113,13 @@ describe('filterQueue', () => {
 		expect(filterQueue(waiting, {})).toHaveLength(5);
 		expect(filterQueue(waiting, { tier: 'P0' })).toHaveLength(1);
 	});
+
+	it("selects the waiting tail with the 'por_procesar' pseudo-tier", () => {
+		const waiting = [item(1, 'rest-001', 'La Oca', null), ...queue];
+		const out = filterQueue(waiting, { tier: 'por_procesar' });
+		expect(out).toHaveLength(1);
+		expect(out[0].establishment.id).toBe('rest-001');
+	});
 });
 
 describe('pocCriterionMet', () => {
@@ -200,12 +207,26 @@ describe('display helpers', () => {
 
 describe('tierCounts and statusCounts', () => {
 	it('counts the queue per tier', () => {
-		expect(tierCounts(queue)).toEqual({ P0: 1, P1: 1, P2: 0, P3: 1, collect_data: 1 });
+		expect(tierCounts(queue)).toEqual({
+			P0: 1,
+			P1: 1,
+			P2: 0,
+			P3: 1,
+			collect_data: 1,
+			por_procesar: 0
+		});
 	});
 
-	it('skips unscored items', () => {
+	it('counts unscored items as por_procesar', () => {
 		const waiting = [item(1, 'a', 'A', null), ...queue];
-		expect(tierCounts(waiting)).toEqual({ P0: 1, P1: 1, P2: 0, P3: 1, collect_data: 1 });
+		expect(tierCounts(waiting)).toEqual({
+			P0: 1,
+			P1: 1,
+			P2: 0,
+			P3: 1,
+			collect_data: 1,
+			por_procesar: 1
+		});
 		const counts = statusCounts(waiting);
 		expect(counts.active).toBe(4);
 		expect(counts.unknown).toBe(0);
@@ -257,11 +278,13 @@ describe('grouped chart rows', () => {
 		expect(tierRowsByMunicipality(lonely)[0].label).toBe('Sin municipio');
 	});
 
-	it('skips unscored items in the grouped charts', () => {
+	it('groups unscored items under por_procesar', () => {
 		const mixed = [item(1, 'a', 'A', { tier: 'P0' }), item(2, 'b', 'B', null)];
 		const rows = tierRowsByMunicipality(mixed);
 		expect(rows).toHaveLength(1);
-		expect(rows[0].total).toBe(1);
+		expect(rows[0].total).toBe(2);
+		expect(rows[0].counts.P0).toBe(1);
+		expect(rows[0].counts.por_procesar).toBe(1);
 	});
 
 	it('folds the tail into a single Otros row when limited', () => {

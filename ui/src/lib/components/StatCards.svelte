@@ -68,7 +68,7 @@
 			key: tier,
 			count: tiers[tier],
 			color: TIER_COLORS[tier],
-			label: tier === 'collect_data' ? 'recoger datos' : tier
+			label: TIER_LABELS[tier].split(' · ')[0].toLowerCase()
 		}))
 	);
 

@@ -4,7 +4,7 @@
  * and pipeline phases. Everything here is unit-tested in turislab.test.ts.
  */
 
-export type Tier = 'P0' | 'P1' | 'P2' | 'P3' | 'collect_data';
+export type Tier = 'P0' | 'P1' | 'P2' | 'P3' | 'collect_data' | 'por_procesar';
 
 export type SuggestedStatus =
 	| 'active'
@@ -112,8 +112,8 @@ export interface QueueFilters {
 	q?: string;
 }
 
-/** The tiers in display order, top priority first. */
-export const TIERS: Tier[] = ['P0', 'P1', 'P2', 'P3', 'collect_data'];
+/** The tiers in display order, top priority first; the waiting tail last. */
+export const TIERS: Tier[] = ['P0', 'P1', 'P2', 'P3', 'collect_data', 'por_procesar'];
 
 /** Human-readable tier labels for the filter chips and the table badges. */
 export const TIER_LABELS: Record<Tier, string> = {
@@ -121,7 +121,8 @@ export const TIER_LABELS: Record<Tier, string> = {
 	P1: 'P1 · Visitar pronto',
 	P2: 'P2 · Programar visita',
 	P3: 'P3 · Vigilar',
-	collect_data: 'Recoger datos'
+	collect_data: 'Recoger datos',
+	por_procesar: 'Por procesar'
 };
 
 /** Tier accent colours, mapped onto the design-system palette. */
@@ -130,7 +131,8 @@ export const TIER_COLORS: Record<Tier, string> = {
 	P1: 'var(--color-partial)',
 	P2: 'var(--color-empty)',
 	P3: 'var(--color-ok)',
-	collect_data: 'var(--color-skipped)'
+	collect_data: 'var(--color-skipped)',
+	por_procesar: 'var(--color-faint)'
 };
 
 /** Human-readable labels for the suggested operational status. */
@@ -153,12 +155,18 @@ export const CATEGORY_LABELS: Record<Category, string> = {
 
 /**
  * Filters the queue by tier, category, municipality and free text on the
- * name, preserving the rank order the backend already applied.
+ * name, preserving the rank order the backend already applied. The
+ * pseudo-tier 'por_procesar' selects the establishments still waiting for
+ * their first score.
  */
 export function filterQueue(queue: QueueItem[], filters: QueueFilters): QueueItem[] {
 	const q = (filters.q ?? '').trim().toLowerCase();
 	return queue.filter((item) => {
-		if (filters.tier && (!item.score || item.score.tier !== filters.tier)) return false;
+		if (filters.tier === 'por_procesar') {
+			if (item.score) return false;
+		} else if (filters.tier && (!item.score || item.score.tier !== filters.tier)) {
+			return false;
+		}
 		if (filters.category && item.establishment.category !== filters.category) return false;
 		if (
 			filters.municipality &&
@@ -265,16 +273,20 @@ export const STATUS_META: Record<SuggestedStatus, StatusMeta> = {
 	unknown: { label: 'Sin datos', color: 'var(--color-skipped)' }
 };
 
-/** Counts the queue per tier. */
+/** Counts the queue per tier; unscored items count as 'por_procesar'. */
 export function tierCounts(queue: QueueItem[]): Record<Tier, number> {
 	const counts: Record<Tier, number> = {
 		P0: 0,
 		P1: 0,
 		P2: 0,
 		P3: 0,
-		collect_data: 0
+		collect_data: 0,
+		por_procesar: 0
 	};
-	for (const item of queue) if (item.score) counts[item.score.tier]++;
+	for (const item of queue) {
+		if (item.score) counts[item.score.tier]++;
+		else counts.por_procesar++;
+	}
 	return counts;
 }
 
@@ -343,7 +355,7 @@ export function tierRowsByMunicipality(queue: QueueItem[], limit = 8): GroupRow<
 	return groupQueue(
 		queue,
 		(item) => item.establishment.municipality || 'Sin municipio',
-		(item) => item.score?.tier,
+		(item) => item.score?.tier ?? 'por_procesar',
 		TIERS,
 		limit
 	);

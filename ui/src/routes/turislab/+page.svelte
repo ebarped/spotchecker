@@ -45,6 +45,10 @@
 
 	const filtered = $derived(report ? filterQueue(report.queue, { tier, category, q }) : []);
 
+	// The first establishment without a score is the scanner's next target:
+	// the waiting tail is ordered by the upcoming scan order.
+	const nextId = $derived(report?.queue.find((i) => !i.score)?.establishment.id ?? null);
+
 	const categories: Category[] = ['restaurant', 'hotel', 'bar', 'other'];
 
 	function setTab(next: 'report' | 'agent') {
@@ -363,6 +367,8 @@
 								<td class="px-4 py-3 text-xs text-muted">
 									{#if item.score}
 										{scanAge(item.scan_age_ns)}
+									{:else if item.establishment.id === nextId}
+										<span class="font-medium text-accent">Siguiente en el scan</span>
 									{:else}
 										<span class="text-partial">Esperando en la cola</span>
 									{/if}
