@@ -1,9 +1,8 @@
 /**
  * Shared ECharts plumbing: the chart palette (read from the app.css theme
- * variables so charts follow the active dark/light aurora) and the option
+ * variables so charts match the dark canvas) and the option
  * fragments every chart builds on (typography, tooltip chrome, legend).
  */
-import { theme } from './theme.svelte';
 
 export interface ChartPalette {
 	ink: string;
@@ -29,10 +28,7 @@ export interface ChartPalette {
 /** The font stack is fixed; only colors differ per theme. */
 const FONT = "'Inter', ui-sans-serif, system-ui, sans-serif";
 
-/**
- * Reads the resolved theme colors off :root. Call it from a `$derived` that
- * also touches `theme.theme`, so options are rebuilt after a theme toggle.
- */
+/** Reads the resolved theme colors off :root. */
 export function chartPalette(): ChartPalette {
 	if (typeof document === 'undefined') {
 		return {

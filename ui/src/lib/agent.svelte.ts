@@ -55,7 +55,7 @@ export interface FlowNode {
 	duration?: number;
 }
 
-const CHAT_KEY = 'turislab-doctor:chat';
+const CHAT_KEY = 'spotchecker:chat';
 
 class AgentController {
 	info = $state<AgentInfo | null>(null);

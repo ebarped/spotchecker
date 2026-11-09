@@ -1,15 +1,12 @@
 <script lang="ts">
 	import type { EChartsOption } from 'echarts';
 	import { chartPalette, legend, tooltip } from '../echarts.svelte';
-	import { theme } from '../theme.svelte';
 	import { TIERS, tierCounts, type Tier, type TurislabReport } from '../turislab';
 	import EChart from './EChart.svelte';
 
 	let { report }: { report: TurislabReport } = $props();
 
-	// Touch theme.theme so the palette (and with it the option) is rebuilt on toggle.
 	const pal = $derived.by(() => {
-		void theme.theme;
 		return chartPalette();
 	});
 

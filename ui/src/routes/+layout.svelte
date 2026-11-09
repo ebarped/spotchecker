@@ -8,7 +8,7 @@
 </script>
 
 <svelte:head>
-	<title>Turislab Doctor</title>
+	<title>SpotChecker</title>
 	<link rel="icon" type="image/png" href={logo} />
 </svelte:head>
 

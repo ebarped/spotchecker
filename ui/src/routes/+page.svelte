@@ -7,4 +7,4 @@
 	});
 </script>
 
-<a href="/turislab/" class="text-muted">Go to the Turislab report</a>
+<a href="/turislab/" class="text-muted">Go to the SpotChecker report</a>

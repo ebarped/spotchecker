@@ -1,7 +1,6 @@
 <script lang="ts">
 	import logo from '../assets/logo.png';
 	import { formatTime, type TurislabReport } from '../turislab';
-	import ThemeToggle from './ThemeToggle.svelte';
 
 	let {
 		report,
@@ -15,8 +14,8 @@
 <header class="mb-8 flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
 	<div class="min-w-0">
 		<div class="flex items-center gap-4">
-			<img src={logo} alt="Gopher con estetoscopio" class="size-12 shrink-0 drop-shadow-sm sm:size-14" />
-			<h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">TurisLab Doctor</h1>
+			<img src={logo} alt="SpotChecker" class="size-12 shrink-0 drop-shadow-sm sm:size-14" />
+			<h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">SpotChecker</h1>
 		</div>
 		<p class="mt-2 max-w-2xl text-sm text-muted">
 			Cola priorizada de establecimientos con riesgo de cierre o pérdida de calidad. El sistema
@@ -85,6 +84,5 @@
 				<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" stroke-linecap="round" stroke-linejoin="round" />
 			</svg>
 		</button>
-		<ThemeToggle />
 	</div>
 </header>

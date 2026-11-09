@@ -1,7 +1,6 @@
 <script lang="ts">
 	import type { EChartsOption } from 'echarts';
 	import { chartPalette, categoryAxis, legend, tooltip, valueAxis } from '../echarts.svelte';
-	import { theme } from '../theme.svelte';
 	import {
 		STATUSES,
 		STATUS_META,
@@ -14,7 +13,6 @@
 	let { report }: { report: TurislabReport } = $props();
 
 	const pal = $derived.by(() => {
-		void theme.theme;
 		return chartPalette();
 	});
 

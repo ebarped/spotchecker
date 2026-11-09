@@ -32,7 +32,7 @@
 	let busy = $state(false);
 
 	// The open tab survives reloads, like the theme.
-	const TAB_KEY = 'turislab-doctor:tab';
+	const TAB_KEY = 'spotchecker:tab';
 	let tab = $state<'report' | 'agent'>(
 		typeof localStorage !== 'undefined' && localStorage.getItem(TAB_KEY) === 'agent'
 			? 'agent'
@@ -104,7 +104,7 @@
 </script>
 
 <svelte:head>
-	<title>TurisLab Doctor · Cola de inspección</title>
+	<title>SpotChecker · Cola de inspección</title>
 </svelte:head>
 
 <div class="mx-auto w-full max-w-7xl flex-1 px-4 pt-8 pb-16 sm:px-6 lg:px-8">
@@ -122,7 +122,7 @@
 	{:else if phase === 'error' && !report}
 		<section class="glass relative mx-auto mt-12 max-w-2xl rounded-2xl p-8">
 			<h1 class="text-2xl font-semibold tracking-tight">
-				TurisLab<span class="aurora-text"> Doctor</span>
+				Spot<span class="aurora-text">Checker</span>
 			</h1>
 			<p class="mt-4 text-sm text-muted">No se pudo leer ningún informe.</p>
 			<p class="mono mt-1 text-xs text-error">{errorMessage}</p>

@@ -25,7 +25,7 @@
 </script>
 
 <svelte:head>
-	<title>{detail ? detail.name : 'Fase'} · TurisLab Doctor</title>
+	<title>{detail ? detail.name : 'Fase'} · SpotChecker</title>
 </svelte:head>
 
 <div class="mx-auto w-full max-w-5xl px-4 py-10 sm:px-6">
