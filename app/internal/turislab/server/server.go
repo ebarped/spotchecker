@@ -156,7 +156,6 @@ func (s *Server) Handler() http.Handler {
 			go func() {
 				_ = s.scanner.ScanOne(context.Background(), id)
 			}()
-			w.WriteHeader(http.StatusAccepted)
 			writeJSON(w, http.StatusAccepted, map[string]string{"status": "refresh triggered"})
 		})
 

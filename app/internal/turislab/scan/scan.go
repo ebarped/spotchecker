@@ -4,6 +4,7 @@ package scan
 import (
 	"context"
 	"math/rand"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -127,6 +128,13 @@ func (s *Scanner) tick(ctx context.Context) error {
 	now := time.Now()
 	s.lastScan.Store(&now)
 
+	started := time.Now()
+	where := cursor
+	if where == "" {
+		where = "el principio"
+	}
+	s.log.Step("scan", "tick: %d establecimiento(s) a partir de %s", targetsCount, where)
+
 	for t := 0; t < targetsCount && t < len(ests); t++ {
 		est := ests[(idx+t)%len(ests)]
 		if err := s.ScanOne(ctx, est.ID); err != nil {
@@ -135,6 +143,7 @@ func (s *Scanner) tick(ctx context.Context) error {
 	}
 
 	_ = s.store.SetCursor(ctx, ests[(idx+targetsCount-1)%len(ests)].ID)
+	s.log.Info("scan", "tick completado en %.1fs", time.Since(started).Seconds())
 	return nil
 }
 
@@ -154,14 +163,12 @@ func (s *Scanner) ScanOne(ctx context.Context, establishmentID string) error {
 		return nil
 	}
 
-	var wg sync.WaitGroup
-	sem := make(chan struct{}, s.cfg.MaxConcurrentSources)
-	var mu sync.Mutex
-	var allSignals []*model.Signal
-
 	now := time.Now()
 
-	s.mu.Lock()
+	// The sources that will actually run: disabled ones and sources in
+	// backoff stay out. Naming them up front makes the log read as the
+	// plan of the scan.
+	var enabled []Source
 	for _, src := range s.sources {
 		if !src.Enabled() {
 			continue
@@ -169,7 +176,27 @@ func (s *Scanner) ScanOne(ctx context.Context, establishmentID string) error {
 		if until, ok := s.backoffs[src.Name()]; ok && now.Before(until) {
 			continue
 		}
+		enabled = append(enabled, src)
+	}
+	names := make([]string, len(enabled))
+	for i, src := range enabled {
+		names[i] = src.Name()
+	}
+	if len(enabled) == 0 {
+		s.log.Warn("scan", "[%s] %s sin fuentes que ejecutar (ninguna habilitada o todas en backoff)",
+			target.ID, target.Name)
+	} else {
+		s.log.Step("scan", "[%s] %s (%s) — escaneando con %s",
+			target.ID, target.Name, target.Municipality, strings.Join(names, " + "))
+	}
 
+	var wg sync.WaitGroup
+	sem := make(chan struct{}, s.cfg.MaxConcurrentSources)
+	var mu sync.Mutex
+	var allSignals []*model.Signal
+
+	s.mu.Lock()
+	for _, src := range enabled {
 		wg.Add(1)
 		go func(src Source) {
 			defer wg.Done()
@@ -178,8 +205,13 @@ func (s *Scanner) ScanOne(ctx context.Context, establishmentID string) error {
 
 			sigs, err := src.Collect(ctx, target)
 			if err != nil {
-				s.log.Warn("source", "%s error: %v", src.Name(), err)
+				s.log.Warn("source", "[%s] %s error: %v", target.ID, src.Name(), err)
 				return
+			}
+			if len(sigs) == 0 {
+				s.log.Info("scan", "[%s] %s no aportó señales", target.ID, src.Name())
+			} else {
+				s.log.Info("scan", "[%s] %s → %d señales", target.ID, src.Name(), len(sigs))
 			}
 			mu.Lock()
 			allSignals = append(allSignals, sigs...)
@@ -204,6 +236,12 @@ func (s *Scanner) ScanOne(ctx context.Context, establishmentID string) error {
 	}
 
 	score := s.scoring.Compute(target, historicalSigs, prevScore, inspDays)
+	s.log.Info("scan", "[%s] score %s · riesgo de cierre %.0f%% · prioridad %.0f/100 · %d evidencias — %s",
+		target.ID, score.Tier, score.ClosureRisk*100, score.Priority, score.EvidenceCount, score.Reason)
+	if prevScore != nil && (prevScore.Status != score.Status || prevScore.Tier != score.Tier) {
+		s.log.Warn("scan", "[%s] cambio de veredicto: %s (%s) → %s (%s)",
+			target.ID, prevScore.Status, prevScore.Tier, score.Status, score.Tier)
+	}
 	_ = s.store.SaveScore(ctx, score)
 	return nil
 }
