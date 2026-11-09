@@ -228,9 +228,9 @@ agent:
   max_turns: 12                   # Rondas máximas por petición. Opciones: 1-30.
   model:
     provider: openai              # Proveedor. Opciones: openai | gemini.
-    name: "gpt-4.1-mini"          # Modelo del proveedor. Opciones: el nombre exacto que acepte el endpoint.
-    base_url: ""                  # "" = API oficial. Opciones: "" o endpoint compatible OpenAI, p. ej. "http://localhost:4000/v1".
-    api_key_env: OPENAI_API_KEY   # NOMBRE de la env var con la clave. Opciones: cualquier nombre válido; nunca la clave literal.
+    name: "openrouter/z-ai/glm-5.3-flash"  # Modelo del proveedor. Opciones: el nombre exacto que acepte el endpoint.
+    base_url: "https://litellm.doi.azure.datadope.co/v1"  # "" = API oficial. Opciones: "" o endpoint compatible OpenAI, p. ej. un gateway LiteLLM.
+    api_key_env: LITELLM_API_KEY  # NOMBRE de la env var con la clave. Opciones: cualquier nombre válido; nunca la clave literal.
   suggestions: []                 # [] = prompts por defecto. Opciones: lista de cadenas.
 
 # -----------------------------------------------------------------------------
