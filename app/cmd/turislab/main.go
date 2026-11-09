@@ -35,6 +35,7 @@ import (
 
 func main() {
 	cfgPath := flag.String("config", "config.turislab.yaml", "path to the YAML configuration file")
+	inputPath := flag.String("input", "", "path to the input JSON/NDJSON (overrides input.path)")
 	addr := flag.String("addr", "", "listen address (overrides config)")
 	once := flag.Bool("once", false, "scan every establishment once and exit")
 	establishment := flag.String("establishment", "", "scan one establishment by id and exit")
@@ -50,6 +51,9 @@ func main() {
 	if err != nil {
 		log.Error("", "config: %v", err)
 		os.Exit(1)
+	}
+	if *inputPath != "" {
+		cfg.Input.Path = *inputPath
 	}
 	log.Info("config", "loaded %s (sources: %v)", *cfgPath, cfg.EnabledSources())
 

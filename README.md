@@ -51,6 +51,7 @@ or `unknown`.
 make build                                  # compile the binary (UI included)
 
 ./turislab --config app/config.turislab.yaml --once              # scan everything once, exit
+./turislab --config app/config.turislab.yaml --input base-de-datos-lugo.json --once # try another registry export
 ./turislab --config app/config.turislab.yaml --establishment <id> # scan one establishment
 ./turislab --config app/config.turislab.yaml --validate           # compare scores with ground truth
 ./turislab --config app/config.turislab.yaml --addr :8090         # scanner + API + UI
@@ -61,6 +62,7 @@ Flags:
 | Flag               | Meaning                                                              |
 |--------------------|----------------------------------------------------------------------|
 | `--config`         | configuration file (default `config.turislab.yaml`)                  |
+| `--input`          | input JSON/NDJSON file (overrides `input.path`)                      |
 | `--addr`           | listen address of the HTTP server (overrides `server.addr`)          |
 | `--once`           | scan every establishment once and exit                               |
 | `--establishment`  | scan one establishment by id and exit                                |
