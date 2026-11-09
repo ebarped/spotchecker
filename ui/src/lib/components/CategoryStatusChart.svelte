@@ -28,7 +28,6 @@
 	}));
 
 	const rows = $derived(statusRowsByCategory(report.queue));
-	const height = $derived(Math.max(200, rows.length * 30 + 70));
 
 	function radius(index: number, row: (typeof rows)[number]): [number, number, number, number] {
 		const present = STATUSES.filter((status) => row.counts[status] > 0);
@@ -80,7 +79,7 @@
 </script>
 
 {#if rows.length > 0}
-	<EChart {option} {height} />
+	<EChart {option} height={250} />
 {:else}
 	<p class="py-8 text-center text-sm text-faint">Todavía no hay establecimientos puntuados.</p>
 {/if}

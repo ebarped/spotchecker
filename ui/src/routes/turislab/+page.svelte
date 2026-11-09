@@ -52,13 +52,6 @@
 		}
 	}
 
-	// A persisted Agent tab on a server without the agent falls back.
-	$effect(() => {
-		if (agent.info !== null && !agent.info.enabled && tab === 'agent') {
-			setTab('report');
-		}
-	});
-
 	async function load(attempt = 0) {
 		if (attempt === 0) {
 			phase = 'loading';
@@ -150,40 +143,55 @@
 			</div>
 		{/if}
 
-		{#if agent.info?.enabled}
-			<div class="mb-6 flex justify-center">
-				<div class="glass inline-flex rounded-full p-1">
-					<button
-						type="button"
-						class="rounded-full px-4 py-1.5 text-sm font-medium transition-colors {tab === 'report'
-							? 'bg-accent/15 text-accent'
-							: 'text-muted hover:text-ink'}"
-						onclick={() => setTab('report')}
-					>
-						Informe
-					</button>
-					<button
-						type="button"
-						class="rounded-full px-4 py-1.5 text-sm font-medium transition-colors {tab === 'agent'
-							? 'bg-accent/15 text-accent'
-							: 'text-muted hover:text-ink'}"
-						onclick={() => {
-							setTab('agent');
-							void agent.loadCatalog();
-						}}
-					>
-						Agente
-					</button>
-				</div>
+		<div class="mb-6 flex justify-center">
+			<div class="glass inline-flex rounded-full p-1">
+				<button
+					type="button"
+					class="rounded-full px-4 py-1.5 text-sm font-medium transition-colors {tab === 'report'
+						? 'bg-accent/15 text-accent'
+						: 'text-muted hover:text-ink'}"
+					onclick={() => setTab('report')}
+				>
+					Informe
+				</button>
+				<button
+					type="button"
+					class="rounded-full px-4 py-1.5 text-sm font-medium transition-colors {tab === 'agent'
+						? 'bg-accent/15 text-accent'
+						: 'text-muted hover:text-ink'}"
+					onclick={() => {
+						setTab('agent');
+						void agent.loadCatalog();
+					}}
+				>
+					Agente
+					{#if agent.info !== null && !agent.info.enabled}
+						<span class="ml-1.5 text-[10px] font-semibold uppercase tracking-wider text-faint">
+							off
+						</span>
+					{/if}
+				</button>
 			</div>
-		{/if}
+		</div>
 
 		{#if tab === 'agent'}
-			<AgentView ready={phase === 'ready'} />
+			{#if agent.info?.enabled}
+				<AgentView ready={phase === 'ready'} />
+			{:else}
+				<section class="glass mx-auto max-w-2xl rounded-2xl p-8 text-center">
+					<h2 class="text-lg font-semibold">El agente no está habilitado</h2>
+					<p class="mt-2 text-sm text-muted">
+						Este servidor sirve el informe y la cola, pero no tiene montado el asistente. Para
+						activarlo, pon <code class="mono text-xs">agent.enabled: true</code> en la configuración y
+						define la clave del modelo en la variable que indique
+						<code class="mono text-xs">agent.model.api_key_env</code>.
+					</p>
+				</section>
+			{/if}
 		{:else}
 			<StatCards {report} />
 
-			<div class="mt-4 grid items-start gap-4 lg:grid-cols-3">
+			<div class="mt-4 grid gap-4 lg:grid-cols-3">
 				<section class="glass rounded-2xl p-5 lg:col-span-1">
 					<h2 class="text-sm font-semibold">Distribución por tier</h2>
 					<p class="mb-3 text-xs text-faint">Toda la cola priorizada por urgencia</p>
@@ -199,7 +207,7 @@
 				</section>
 			</div>
 
-			<div class="mt-4 grid items-start gap-4 lg:grid-cols-2">
+			<div class="mt-4 grid gap-4 lg:grid-cols-2">
 				<section class="glass rounded-2xl p-5">
 					<h2 class="text-sm font-semibold">Estado por categoría</h2>
 					<p class="mb-3 text-xs text-faint">Qué tipo de negocio hay detrás de cada estado</p>

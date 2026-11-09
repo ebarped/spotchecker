@@ -28,10 +28,9 @@
 		collect_data: 'Recoger datos'
 	};
 
-	const rows = $derived(tierRowsByMunicipality(report.queue));
-
-	// 30px per row fits a label wrapped onto two 14px lines.
-	const height = $derived(Math.max(200, rows.length * 30 + 70));
+	// Six municipalities fit the fixed 250px chart with two-line labels;
+	// the rest are folded into the "Otros" row.
+	const rows = $derived(tierRowsByMunicipality(report.queue, 6));
 
 	// Stacked horizontal bars read left-to-right: the first non-empty
 	// segment carries the left radius, the last one the right radius.
@@ -85,7 +84,7 @@
 </script>
 
 {#if rows.length > 0}
-	<EChart {option} {height} />
+	<EChart {option} height={250} />
 {:else}
 	<p class="py-8 text-center text-sm text-faint">
 		Todavía no hay establecimientos puntuados en ningún municipio.
