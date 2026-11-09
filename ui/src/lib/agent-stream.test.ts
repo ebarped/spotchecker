@@ -3,8 +3,10 @@ import {
 	CONNECTION_LOST_TEXT,
 	MAX_STORED_MESSAGES,
 	NO_ANSWER_TEXT,
+	STOPPED_TEXT,
 	applyStreamEvent,
 	dropFailedTurns,
+	endStoppedTurn,
 	endStream,
 	findOpenStep,
 	httpErrorText,
@@ -182,6 +184,29 @@ describe('applyStreamEvent — terminal events', () => {
 		endStream(message, turn);
 		expect(message.error).toBeUndefined();
 		expect(message.steps).toEqual([]);
+	});
+});
+
+describe('endStoppedTurn', () => {
+	it('keeps the partial answer without marking it a failure', () => {
+		const { message, turn } = run([{ type: 'delta', text: 'Half an ans' }]);
+		endStoppedTurn(message, turn);
+		expect(message.error).toBeUndefined();
+		expect(message.text).toBe('Half an ans');
+		expect(turn.finished).toBe(true);
+	});
+
+	it('fills an empty run with the stopped text instead of a blank bubble', () => {
+		const { message, turn } = run([]);
+		endStoppedTurn(message, turn);
+		expect(message.error).toBeUndefined();
+		expect(message.text).toBe(STOPPED_TEXT);
+	});
+
+	it('is a no-op after a terminal event', () => {
+		const { message, turn } = run([{ type: 'delta', text: 'ok' }, { type: 'done' }]);
+		endStoppedTurn(message, turn);
+		expect(message.text).toBe('ok');
 	});
 });
 

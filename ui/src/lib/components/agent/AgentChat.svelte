@@ -125,14 +125,29 @@
 			class="min-w-0 flex-1 resize-none rounded-xl border border-line bg-surface px-3 py-2 text-sm text-ink placeholder:text-faint focus:border-line-strong focus:outline-none"
 		></textarea>
 		<div class="flex w-28 flex-col gap-1.5">
-			<button
-				type="submit"
-				disabled={!ready || agent.streaming || draft.trim() === ''}
-				class="tile flex-[2] rounded-xl text-sm font-semibold text-white disabled:opacity-40"
-				style="--tile: #b85c38"
-			>
-				Send
-			</button>
+			{#if agent.streaming}
+				<button
+					type="button"
+					onclick={() => agent.stop()}
+					class="tile flex flex-[2] items-center justify-center gap-1.5 rounded-xl text-sm font-semibold text-white"
+					style="--tile: #b85c38"
+					title="Stop the agent"
+				>
+					<svg class="size-3.5" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+						<rect x="6" y="6" width="12" height="12" rx="2.5" />
+					</svg>
+					Stop
+				</button>
+			{:else}
+				<button
+					type="submit"
+					disabled={!ready || draft.trim() === ''}
+					class="tile flex flex-[2] items-center justify-center rounded-xl text-sm font-semibold text-white disabled:opacity-40"
+					style="--tile: #b85c38"
+				>
+					Send
+				</button>
+			{/if}
 			<button
 				type="button"
 				onclick={() => agent.reset()}

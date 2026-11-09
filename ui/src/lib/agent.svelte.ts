@@ -29,6 +29,7 @@ export interface AgentInfo {
 
 import {
 	applyStreamEvent,
+	endStoppedTurn,
 	endStream,
 	httpErrorText,
 	newTurnState,
@@ -63,6 +64,8 @@ class AgentController {
 	messages = $state<ChatMessage[]>([]);
 	sessionId = $state('');
 	streaming = $state(false);
+	/** Aborts the fetch of the turn that is streaming right now. */
+	private abort?: AbortController;
 
 	/** Restores the last conversation from localStorage (F5 keeps the chat).
 	 * Failed turns are dropped on restore as well as on save, so an old key
@@ -129,12 +132,15 @@ class AgentController {
 		this.streaming = true;
 		const t0 = performance.now();
 		const turn: TurnState = newTurnState(() => performance.now() - t0);
+		const abort = new AbortController();
+		this.abort = abort;
 
 		try {
 			const res = await fetch('/api/agent/chat', {
 				method: 'POST',
 				headers: { 'Content-Type': 'application/json' },
-				body: JSON.stringify({ session_id: this.sessionId || undefined, message })
+				body: JSON.stringify({ session_id: this.sessionId || undefined, message }),
+				signal: abort.signal
 			});
 			if (!res.ok || !res.body) {
 				reply.text = httpErrorText(res.status);
@@ -154,14 +160,24 @@ class AgentController {
 			}
 			endStream(reply, turn);
 		} catch (error) {
-			reply.error = true;
-			if (reply.text === '') {
-				reply.text = `The chat failed: ${error instanceof Error ? error.message : String(error)}`;
+			if (abort.signal.aborted) {
+				endStoppedTurn(reply, turn);
+			} else {
+				reply.error = true;
+				if (reply.text === '') {
+					reply.text = `The chat failed: ${error instanceof Error ? error.message : String(error)}`;
+				}
 			}
 		} finally {
+			this.abort = undefined;
 			this.streaming = false;
 			this.save();
 		}
+	}
+
+	/** Stops the running turn: the server cancels the agent on disconnect. */
+	stop(): void {
+		this.abort?.abort();
 	}
 
 	/** Applies one SSE event to the streaming reply and the session id. */
