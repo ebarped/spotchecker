@@ -44,8 +44,8 @@ func TestToolsCatalogBuiltin(t *testing.T) {
 	if report.Key != "report" || report.Error != "" {
 		t.Fatalf("report source = %+v", report)
 	}
-	if len(report.Tools) != 3 {
-		t.Fatalf("report tools = %d, want 3", len(report.Tools))
+	if len(report.Tools) != 4 {
+		t.Fatalf("report tools = %d, want 4", len(report.Tools))
 	}
 	names := map[string]bool{}
 	for _, tool := range report.Tools {
@@ -117,7 +117,7 @@ func TestToolsCatalogExternalUnreachable(t *testing.T) {
 	if catalog.External[0].Error == "" {
 		t.Errorf("unreachable server reported no error")
 	}
-	if len(catalog.Builtin) == 0 || len(catalog.Builtin[0].Tools) != 3 {
+	if len(catalog.Builtin) == 0 || len(catalog.Builtin[0].Tools) != 4 {
 		t.Errorf("builtin report tools lost: %+v", catalog.Builtin)
 	}
 }

@@ -260,6 +260,70 @@ func establishmentDetail(report *model.Report, id string) (*estDetail, error) {
 	return nil, fmt.Errorf("no establishment with id %q in the current queue", id)
 }
 
+// estExplanation is the human-readable breakdown the agent uses to explain
+// to an inspector why an establishment carries its score.
+type estExplanation struct {
+	Establishment string           `json:"establishment"`
+	Verdict       string           `json:"verdict"`
+	Score         map[string]any   `json:"score"`
+	Explanation   string           `json:"explanation"`
+	Evidence      []map[string]any `json:"evidence,omitempty"`
+}
+
+// establishmentExplanation builds the plain-language breakdown of one
+// establishment: the suggested status, the closure risk and the evidence
+// signals that justify it, ready for the agent to relay to an inspector.
+func establishmentExplanation(report *model.Report, id string) (*estExplanation, error) {
+	detail, err := establishmentDetail(report, id)
+	if err != nil {
+		return nil, err
+	}
+
+	est := detail.Establishment
+	score := detail.Score
+	name, _ := est["name"].(string)
+	municipality, _ := est["municipality"].(string)
+	status, _ := score["status"].(string)
+	reason, _ := score["reason"].(string)
+	risk, _ := score["closure_risk"].(float64)
+	priority, _ := score["priority"].(float64)
+
+	var b strings.Builder
+	fmt.Fprintf(&b, "Establecimiento: %s (%s).\n", name, municipality)
+	fmt.Fprintf(&b, "Veredicto sugerido: %s.\n", status)
+	fmt.Fprintf(&b, "Riesgo de cierre: %.0f%% · prioridad %.0f/100.\n", risk*100, priority)
+
+	if detail.Evidence == nil {
+		b.WriteString("Sin evidencias registradas todavía: el score se apoya solo en el registro y la antigüedad de la última inspección.")
+	} else {
+		b.WriteString("Evidencias que sostienen el score:\n")
+		for i, ev := range detail.Evidence {
+			source, _ := ev["source"].(string)
+			label, _ := ev["label"].(string)
+			weight, _ := ev["weight"].(float64)
+			fmt.Fprintf(&b, "  %d. %s (%s, peso %.2f)\n", i+1, label, source, weight)
+		}
+	}
+
+	if reason != "" {
+		fmt.Fprintf(&b, "\nMotivo del motor: %s", reason)
+	}
+	if conflict, _ := score["conflict"].(bool); conflict {
+		b.WriteString("\n⚠ Las fuentes se contradicen: una dice cerrado y otra abierto. Verificar en el terreno.")
+	}
+	if volatile, _ := score["volatile"].(bool); volatile {
+		b.WriteString("\n⚠ El score es volátil: ha cambiado mucho respecto al scan anterior.")
+	}
+
+	return &estExplanation{
+		Establishment: fmt.Sprintf("%s (%s)", name, municipality),
+		Verdict:       status,
+		Score:         score,
+		Explanation:   b.String(),
+		Evidence:      detail.Evidence,
+	}, nil
+}
+
 // buildTools turns the pure helpers into ADK function tools over source.
 func buildTools(source reportSource) []tool.Tool {
 	newTool := func(t tool.Tool, err error) tool.Tool {
@@ -334,7 +398,14 @@ func buildTools(source reportSource) []tool.Tool {
 		return establishmentDetail(source.report(), strings.TrimSpace(args.ID))
 	}))
 
-	return []tool.Tool{summaryTool, listEsts, detailTool}
+	explainTool := newTool(functiontool.New(functiontool.Config{
+		Name:        "explain_establishment",
+		Description: "Plain-language explanation of why one establishment carries its score: the suggested verdict, the closure risk and priority, and the evidence signals that justify them, formatted to be relayed to an inspector. Use this when the user asks why an establishment is ranked the way it is.",
+	}, func(_ agent.Context, args detailArgs) (*estExplanation, error) {
+		return establishmentExplanation(source.report(), strings.TrimSpace(args.ID))
+	}))
+
+	return []tool.Tool{summaryTool, listEsts, detailTool, explainTool}
 }
 
 // sortEvidence orders the primary signals of a queue entry by weight, used

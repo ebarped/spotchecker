@@ -296,14 +296,14 @@ func TestEstablishmentDetailMisses(t *testing.T) {
 	}
 }
 
-func TestBuildToolsRegistersTheThreeHelpers(t *testing.T) {
+func TestBuildToolsRegistersTheFourHelpers(t *testing.T) {
 	var source atomicReport
 	source.set(fixtureReport())
 	tools := buildTools(&source)
-	if len(tools) != 3 {
-		t.Fatalf("got %d tools, want 3", len(tools))
+	if len(tools) != 4 {
+		t.Fatalf("got %d tools, want 4", len(tools))
 	}
-	want := map[string]bool{"get_report_summary": false, "list_establishments": false, "get_establishment_detail": false}
+	want := map[string]bool{"get_report_summary": false, "list_establishments": false, "get_establishment_detail": false, "explain_establishment": false}
 	for _, tool := range tools {
 		if _, ok := want[tool.Name()]; !ok {
 			t.Errorf("unexpected tool %q", tool.Name())
