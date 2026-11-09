@@ -8,6 +8,7 @@
 	import RiskHistogram from '../../lib/components/RiskHistogram.svelte';
 	import StatCards from '../../lib/components/StatCards.svelte';
 	import TierDonut from '../../lib/components/TierDonut.svelte';
+	import { toasts } from '../../lib/toast.svelte';
 	import {
 		CATEGORY_LABELS,
 		filterQueue,
@@ -17,6 +18,7 @@
 		TIER_LABELS,
 		riskLabel,
 		scanAge,
+		scoreChanges,
 		type Category,
 		type Tier,
 		type TurislabReport
@@ -30,6 +32,8 @@
 	let category = $state<Category | ''>('');
 	let q = $state('');
 	let busy = $state(false);
+	/** Establishments with a re-scan in flight, waiting for their new score. */
+	let pending = $state<Set<string>>(new Set());
 
 	// The open tab survives reloads, like the theme.
 	const TAB_KEY = 'spotchecker:tab';
@@ -50,6 +54,35 @@
 		} catch {
 			// storage unavailable: the tab just does not persist
 		}
+	}
+
+	/**
+	 * Swaps the report in and toasts what changed against the previous
+	 * snapshot: finished scans, scan errors and the establishments the
+	 * scanner re-scored (a changed computed_at), first scans included.
+	 */
+	function applyReport(next: TurislabReport) {
+		const changes = scoreChanges(report, next);
+		if (report?.scan_running && !next.scan_running && !next.scan_error) {
+			toasts.ok('Scan terminado', `${next.summary.total} establecimientos en la cola`);
+		}
+		if (next.scan_error && next.scan_error !== report?.scan_error) {
+			toasts.error('El scan terminó con error', next.scan_error);
+		}
+		for (const change of changes.slice(0, 3)) {
+			toasts.ok(
+				change.first ? `${change.name}: primer score` : `${change.name} sincronizado`,
+				`riesgo de cierre ${Math.round(change.closureRisk * 100)}% · tier ${change.tier}`
+			);
+		}
+		if (changes.length > 3) {
+			toasts.info('Sincronización en curso', `${changes.length - 3} establecimientos más actualizados`);
+		}
+		if (changes.length > 0) {
+			pending = new Set([...pending].filter((id) => !changes.some((c) => c.id === id)));
+		}
+		report = next;
+		phase = 'ready';
 	}
 
 	async function load(attempt = 0) {
@@ -74,18 +107,36 @@
 			if (!type.includes('json')) {
 				throw new Error(`/api/report respondió ${type || 'sin content-type'} en vez de JSON`);
 			}
-			report = (await res.json()) as TurislabReport;
-			phase = 'ready';
+			applyReport((await res.json()) as TurislabReport);
 		} catch (err) {
 			errorMessage = err instanceof Error ? err.message : String(err);
 			phase = 'error';
+			// Only the first load and manual reloads toast: the 5s polling
+			// loop must not stack errors while the server is down.
+			if (attempt === 0) toasts.error('No se pudo leer el informe', errorMessage);
 		} finally {
 			if (attempt === 0) busy = false;
 		}
 	}
 
-	async function refresh(id: string) {
-		await fetch(`/api/establishments/${id}/refresh`, { method: 'POST' });
+	async function refresh(id: string, name: string) {
+		toasts.info(`Sincronizando ${name}…`, 'El re-escaneo corre en segundo plano');
+		try {
+			const res = await fetch(`/api/establishments/${id}/refresh`, { method: 'POST' });
+			if (!res.ok) throw new Error(`HTTP ${res.status}`);
+			// A single-establishment refresh does not flip the scanner's
+			// running flag, so the page polls until its score shows up in
+			// the report (or gives up after 90 s if the scan stalls).
+			pending = new Set(pending).add(id);
+			setTimeout(
+				() => {
+					pending = new Set([...pending].filter((x) => x !== id));
+				},
+				90_000
+			);
+		} catch (err) {
+			toasts.error(`No se pudo sincronizar ${name}`, err instanceof Error ? err.message : String(err));
+		}
 	}
 
 	function reload() {
@@ -95,10 +146,11 @@
 	onMount(() => {
 		void load();
 		void agent.loadInfo();
-		// Poll while a scan is running so the queue updates itself.
+		// Poll while a scan runs or a re-scan is in flight so the queue and
+		// its toasts update themselves; idle ticks are a no-op.
 		const timer = setInterval(() => {
-			if (report?.scan_running) void load(1);
-		}, 5000);
+			if (report?.scan_running || pending.size > 0) void load(1);
+		}, 3000);
 		return () => clearInterval(timer);
 	});
 </script>
@@ -318,7 +370,7 @@
 								<td class="px-4 py-3 text-right">
 									<button
 										type="button"
-										onclick={() => void refresh(item.establishment.id)}
+										onclick={() => void refresh(item.establishment.id, item.establishment.name)}
 										class="glass glass-hover rounded-full px-3 py-1 text-xs"
 										title="Re-escanear este establecimiento ahora"
 									>

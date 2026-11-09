@@ -2,6 +2,7 @@
 	import '../app.css';
 	import logo from '../lib/assets/logo.png';
 	import AuroraBackground from '../lib/components/AuroraBackground.svelte';
+	import Toasts from '../lib/components/Toasts.svelte';
 	import type { LayoutProps } from './$types';
 
 	let { children }: LayoutProps = $props();
@@ -17,3 +18,5 @@
 <div class="relative flex min-h-screen flex-col">
 	{@render children()}
 </div>
+
+<Toasts />

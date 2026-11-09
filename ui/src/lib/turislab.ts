@@ -189,6 +189,41 @@ export function scanAge(scanAgeNs: number): string {
 	return `hace ${Math.round(ms / 86_400_000)} d`;
 }
 
+/** One establishment whose score changed between two report snapshots. */
+export interface ScoreChange {
+	id: string;
+	name: string;
+	tier: Tier;
+	closureRisk: number;
+	/** True when the establishment had no score before: its first scan. */
+	first: boolean;
+}
+
+/**
+ * The establishments whose score changed between two reports, in queue
+ * order. A changed computed_at means the scanner re-scored the
+ * establishment; the first load (prev null) reports nothing so landing on
+ * the page stays quiet.
+ */
+export function scoreChanges(prev: TurislabReport | null, next: TurislabReport): ScoreChange[] {
+	if (!prev) return [];
+	const before = new Map(prev.queue.map((i) => [i.establishment.id, i.score?.computed_at]));
+	const out: ScoreChange[] = [];
+	for (const item of next.queue) {
+		const was = before.get(item.establishment.id);
+		if (item.score && item.score.computed_at !== was) {
+			out.push({
+				id: item.establishment.id,
+				name: item.establishment.name,
+				tier: item.score.tier,
+				closureRisk: item.score.closure_risk,
+				first: was === undefined
+			});
+		}
+	}
+	return out;
+}
+
 /**
  * True when the report satisfies the PoC success criterion: every
  * ground-truth closed establishment sits within the top 3 ranks. Used by the

@@ -5,6 +5,7 @@ import {
 	pocCriterionMet,
 	riskLabel,
 	scanAge,
+	scoreChanges,
 	STATUSES,
 	statusCounts,
 	statusRowsByCategory,
@@ -129,6 +130,49 @@ describe('pocCriterionMet', () => {
 
 	it('fails with an empty closed list (nothing to validate)', () => {
 		expect(pocCriterionMet(queue, [])).toBe(false);
+	});
+});
+
+describe('scoreChanges', () => {
+	const report = (scores: (Score | null)[]): Parameters<typeof scoreChanges>[1] => ({
+		generated_at: '',
+		establishment_count: scores.length,
+		queue: scores.map((score, i) => ({
+			rank: i + 1,
+			establishment: { id: `est-${i}`, name: `Est ${i}`, category: 'restaurant' } as never,
+			score,
+			primary_signals: [],
+			scan_age_ns: 0
+		})),
+		summary: {} as never,
+		scan_cursor: '',
+		scan_running: false,
+		sources: []
+	});
+	const scored = (id: string, at: string) =>
+		score({ establishment_id: id, computed_at: at, tier: 'P0', priority: 50 });
+
+	it('reports nothing on the first load', () => {
+		expect(scoreChanges(null, report([scored('a', 't1')]))).toHaveLength(0);
+	});
+
+	it('detects a re-scored establishment by computed_at', () => {
+		const prev = report([scored('a', 't1')]);
+		const next = report([scored('a', 't2')]);
+		const changes = scoreChanges(prev, next);
+		expect(changes).toHaveLength(1);
+		expect(changes[0]).toMatchObject({ id: 'est-0', tier: 'P0', first: false });
+	});
+
+	it('marks a first scan when the score appears', () => {
+		const prev = report([null]);
+		const next = report([scored('a', 't1')]);
+		expect(scoreChanges(prev, next)[0]).toMatchObject({ id: 'est-0', first: true });
+	});
+
+	it('ignores stable scores', () => {
+		const prev = report([scored('a', 't1')]);
+		expect(scoreChanges(prev, report([scored('a', 't1')]))).toHaveLength(0);
 	});
 });
 
