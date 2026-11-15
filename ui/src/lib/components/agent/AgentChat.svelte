@@ -145,7 +145,7 @@
 					class="tile flex flex-[2] items-center justify-center rounded-xl text-sm font-semibold text-white disabled:opacity-40"
 					style="--tile: #b85c38"
 				>
-					Enviar
+					Send
 				</button>
 			{/if}
 			<button
@@ -154,7 +154,7 @@
 				disabled={agent.streaming || agent.messages.length === 0}
 				class="flex-1 rounded-xl border border-accent/40 bg-accent/10 text-[11px] font-semibold text-accent transition-colors hover:bg-accent/20 disabled:opacity-40"
 			>
-				Nueva conversación
+				New Chat
 			</button>
 		</div>
 	</form>
