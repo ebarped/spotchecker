@@ -146,6 +146,23 @@ type Score struct {
 	Reason           string          `json:"reason"`
 	Volatile         bool            `json:"volatile"`
 	ConflictDetected bool            `json:"conflict_detected"`
+
+	// HeuristicStatus/Reason keep what the deterministic engine decided,
+	// so the judge's verdict can be compared against it. Status and Reason
+	// hold the FINAL verdict: the judge's when it ran, the engine's
+	// otherwise.
+	HeuristicStatus StatusSuggested `json:"heuristic_status"`
+	HeuristicReason string          `json:"heuristic_reason"`
+
+	// Judge fields, populated when the LLM judge reviewed the evidence
+	// (judge.enabled). JudgeModel empty means it did not run.
+	JudgeModel      string          `json:"judge_model,omitempty"`
+	JudgeStatus     StatusSuggested `json:"judge_status,omitempty"`
+	JudgeReason     string          `json:"judge_reason,omitempty"`
+	JudgeConfidence float64         `json:"judge_confidence,omitempty"`
+	// JudgeError records why the judge failed for this score: the final
+	// verdict is then the engine's.
+	JudgeError string `json:"judge_error,omitempty"`
 }
 
 func NewScore(id string) *Score {

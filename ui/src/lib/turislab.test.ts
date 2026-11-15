@@ -37,6 +37,8 @@ function score(overrides: Partial<Score> = {}): Score {
 		reason: 'Sin indicios',
 		volatile: false,
 		conflict_detected: false,
+		heuristic_status: 'active',
+		heuristic_reason: 'Sin indicios',
 		...overrides
 	};
 }

@@ -218,8 +218,8 @@ func TestPipelinePhases(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
 		t.Fatalf("bad JSON: %v", err)
 	}
-	if len(out.Phases) != 6 {
-		t.Errorf("phases = %d, want 6", len(out.Phases))
+	if len(out.Phases) != 7 {
+		t.Errorf("phases = %d, want 7", len(out.Phases))
 	}
 }
 

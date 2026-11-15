@@ -22,9 +22,9 @@ export default defineConfig({
 			//
 			// Asset paths are absolute: the Go server mounts the bundle at the
 			// root, but prerendered pages also live at nested routes
-			// (/turislab/, /how-it-works/). With relative paths those pages
-			// would request ./_app/... from /turislab/_app/... and get HTML
-			// instead of JS.
+			// (/how-it-works/). With relative paths those pages would request
+			// ./_app/... from /how-it-works/_app/... and get HTML instead of
+			// JS.
 			paths: { relative: false },
 			adapter: adapter({ pages: '../app/ui/build', assets: '../app/ui/build' })
 		})

@@ -45,6 +45,7 @@ type Config struct {
 	Tiers    TierConfig     `yaml:"tiers"`
 	Server   ServerConfig   `yaml:"server"`
 	Agent    AgentConfig    `yaml:"agent"`
+	Judge    JudgeConfig    `yaml:"judge"`
 	Metrics  MetricsConfig  `yaml:"metrics"`
 	Logging  LoggingConfig  `yaml:"logging"`
 	Legal    LegalConfig    `yaml:"legal"`
@@ -266,6 +267,20 @@ type AgentModelConfig struct {
 	Name      string `yaml:"name"`
 	BaseURL   string `yaml:"base_url"`
 	APIKeyEnv string `yaml:"api_key_env"`
+}
+
+// JudgeConfig configures the LLM judge that reviews the evidence and
+// issues the final verdict after the deterministic engine scores it.
+type JudgeConfig struct {
+	Enabled bool `yaml:"enabled"`
+	// Model selects the judge LLM. When name is empty the agent's model
+	// (agent.model) is reused, so both features share one endpoint.
+	Model AgentModelConfig `yaml:"model"`
+	// TimeoutSeconds bounds one judge call; past it the establishment
+	// keeps the engine's verdict.
+	TimeoutSeconds int `yaml:"timeout_seconds"`
+	// MaxSignals caps how many signals ride in the judge dossier.
+	MaxSignals int `yaml:"max_signals"`
 }
 
 // MCPServerConfig points the agent at one external MCP server (streamable

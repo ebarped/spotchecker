@@ -1,7 +1,13 @@
 <script lang="ts">
 	import type { EChartsOption } from 'echarts';
 	import { chartPalette, categoryAxis, legend, tooltip, valueAxis } from '../echarts.svelte';
-	import { TIERS, tierRowsByMunicipality, type Tier, type TurislabReport } from '../turislab';
+	import {
+		TIERS,
+		TIER_CHART_LABELS,
+		tierRowsByMunicipality,
+		type Tier,
+		type TurislabReport
+	} from '../turislab';
 	import EChart from './EChart.svelte';
 
 	let { report }: { report: TurislabReport } = $props();
@@ -18,15 +24,6 @@
 		collect_data: pal.accent2,
 		por_procesar: pal.faint
 	}));
-
-	const SHORT: Record<Tier, string> = {
-		P0: 'P0 · Visitar ya',
-		P1: 'P1 · Visitar pronto',
-		P2: 'P2 · Programar',
-		P3: 'P3 · Vigilar',
-		collect_data: 'Datos insuf.',
-		por_procesar: 'Sin escanear'
-	};
 
 	// Six municipalities fit the fixed 250px chart with two-line labels;
 	// the rest are folded into the "Otros" row.
@@ -69,7 +66,7 @@
 		xAxis: { ...valueAxis(pal), minInterval: 1 },
 		yAxis: { ...categoryAxis(rows.map((r) => r.label), pal, 160), inverse: true },
 		series: TIERS.map((tier, index) => ({
-			name: SHORT[tier],
+			name: TIER_CHART_LABELS[tier],
 			type: 'bar' as const,
 			stack: 'municipalities',
 			barWidth: 13,

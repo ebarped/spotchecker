@@ -122,6 +122,13 @@ func (s *SQLiteStore) migrate() error {
 		reason TEXT,
 		volatile INTEGER,
 		conflict_detected INTEGER,
+		heuristic_status TEXT NOT NULL DEFAULT '',
+		heuristic_reason TEXT NOT NULL DEFAULT '',
+		judge_model TEXT NOT NULL DEFAULT '',
+		judge_status TEXT NOT NULL DEFAULT '',
+		judge_reason TEXT NOT NULL DEFAULT '',
+		judge_confidence REAL NOT NULL DEFAULT 0,
+		judge_error TEXT NOT NULL DEFAULT '',
 		updated_at TEXT
 	);
 
@@ -131,8 +138,43 @@ func (s *SQLiteStore) migrate() error {
 		updated_at TEXT
 	);
 	`
-	_, err := s.db.Exec(query)
-	return err
+	if _, err := s.db.Exec(query); err != nil {
+		return err
+	}
+	return s.migrateScores()
+}
+
+// scoreColumns added after the first release. Databases created before
+// each column existed get it through ALTER TABLE; fresh ones already carry
+// them in the CREATE TABLE above.
+var scoreColumns = []struct{ name, decl string }{
+	{"heuristic_status", "TEXT NOT NULL DEFAULT ''"},
+	{"heuristic_reason", "TEXT NOT NULL DEFAULT ''"},
+	{"judge_model", "TEXT NOT NULL DEFAULT ''"},
+	{"judge_status", "TEXT NOT NULL DEFAULT ''"},
+	{"judge_reason", "TEXT NOT NULL DEFAULT ''"},
+	{"judge_confidence", "REAL NOT NULL DEFAULT 0"},
+	{"judge_error", "TEXT NOT NULL DEFAULT ''"},
+}
+
+// migrateScores adds the score columns an older database misses.
+func (s *SQLiteStore) migrateScores() error {
+	for _, col := range scoreColumns {
+		query := `SELECT 1 FROM pragma_table_info('scores') WHERE name = ?`
+		var exists int
+		err := s.db.QueryRowContext(context.Background(), query, col.name).Scan(&exists)
+		if err == nil {
+			continue // already present
+		}
+		if err != sql.ErrNoRows {
+			return err
+		}
+		alter := fmt.Sprintf("ALTER TABLE scores ADD COLUMN %s %s", col.name, col.decl)
+		if _, err := s.db.Exec(alter); err != nil {
+			return fmt.Errorf("add scores.%s: %w", col.name, err)
+		}
+	}
+	return nil
 }
 
 func (s *SQLiteStore) SaveEstablishment(ctx context.Context, e *model.Establishment) error {
@@ -303,54 +345,88 @@ func (s *SQLiteStore) SaveScore(ctx context.Context, sc *model.Score) error {
 	query := `
 	INSERT INTO scores (
 		establishment_id, computed_at, closure_risk, quality_risk, quality_delta,
-		priority, tier, confidence, evidence_count, status, reason, volatile, conflict_detected, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		priority, tier, confidence, evidence_count, status, reason, volatile, conflict_detected,
+		heuristic_status, heuristic_reason, judge_model, judge_status, judge_reason,
+		judge_confidence, judge_error, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(establishment_id) DO UPDATE SET
 		computed_at=excluded.computed_at, closure_risk=excluded.closure_risk, quality_risk=excluded.quality_risk,
 		quality_delta=excluded.quality_delta, priority=excluded.priority, tier=excluded.tier,
 		confidence=excluded.confidence, evidence_count=excluded.evidence_count, status=excluded.status,
-		reason=excluded.reason, volatile=excluded.volatile, conflict_detected=excluded.conflict_detected, updated_at=excluded.updated_at
+		reason=excluded.reason, volatile=excluded.volatile, conflict_detected=excluded.conflict_detected,
+		heuristic_status=excluded.heuristic_status, heuristic_reason=excluded.heuristic_reason,
+		judge_model=excluded.judge_model, judge_status=excluded.judge_status, judge_reason=excluded.judge_reason,
+		judge_confidence=excluded.judge_confidence, judge_error=excluded.judge_error, updated_at=excluded.updated_at
 	`
 	_, err := s.db.ExecContext(ctx, query,
 		sc.EstablishmentID, compAt, sc.ClosureRisk, sc.QualityRisk, sc.QualityDelta,
 		sc.Priority, string(sc.Tier), sc.Confidence, sc.EvidenceCount, string(sc.Status),
-		sc.Reason, boolToInt(sc.Volatile), boolToInt(sc.ConflictDetected), now,
+		sc.Reason, boolToInt(sc.Volatile), boolToInt(sc.ConflictDetected),
+		string(sc.HeuristicStatus), sc.HeuristicReason, sc.JudgeModel, string(sc.JudgeStatus),
+		sc.JudgeReason, sc.JudgeConfidence, sc.JudgeError, now,
 	)
 	return err
 }
 
-func (s *SQLiteStore) GetScore(ctx context.Context, establishmentID string) (*model.Score, error) {
-	query := `SELECT establishment_id, computed_at, closure_risk, quality_risk, quality_delta, priority, tier, confidence, evidence_count, status, reason, volatile, conflict_detected FROM scores WHERE establishment_id = ?`
-	row := s.db.QueryRowContext(ctx, query, establishmentID)
+// scoreColumnsQuery lists every score column in scan order.
+const scoreColumnsQuery = `establishment_id, computed_at, closure_risk, quality_risk, quality_delta, priority, tier, confidence, evidence_count, status, reason, volatile, conflict_detected, heuristic_status, heuristic_reason, judge_model, judge_status, judge_reason, judge_confidence, judge_error`
 
+// scanScore reads one score row produced by scoreColumnsQuery.
+func scanScore(row interface{ Scan(dest ...any) error }) (*model.Score, error) {
 	var sc model.Score
 	var compAt string
 	var tier, status string
 	var vol, confDet int
+	var heurStatus, heurReason, judgeModel, judgeStatus, judgeReason, judgeError string
 
 	err := row.Scan(
 		&sc.EstablishmentID, &compAt, &sc.ClosureRisk, &sc.QualityRisk, &sc.QualityDelta,
 		&sc.Priority, &tier, &sc.Confidence, &sc.EvidenceCount, &status,
 		&sc.Reason, &vol, &confDet,
+		&heurStatus, &heurReason, &judgeModel, &judgeStatus, &judgeReason,
+		&sc.JudgeConfidence, &judgeError,
 	)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, ErrNotFound
-		}
 		return nil, err
 	}
 	sc.Tier = model.TierLabel(tier)
 	sc.Status = model.StatusSuggested(status)
 	sc.Volatile = vol == 1
 	sc.ConflictDetected = confDet == 1
+	sc.HeuristicStatus = model.StatusSuggested(heurStatus)
+	sc.HeuristicReason = heurReason
+	sc.JudgeModel = judgeModel
+	sc.JudgeStatus = model.StatusSuggested(judgeStatus)
+	sc.JudgeReason = judgeReason
+	sc.JudgeError = judgeError
+	// Rows written before the judge existed carry no heuristic verdict:
+	// the engine's is the only one there ever was.
+	if sc.HeuristicStatus == "" {
+		sc.HeuristicStatus = sc.Status
+		sc.HeuristicReason = sc.Reason
+	}
 	if t, err := time.Parse(time.RFC3339, compAt); err == nil {
 		sc.ComputedAt = t
 	}
 	return &sc, nil
 }
 
+func (s *SQLiteStore) GetScore(ctx context.Context, establishmentID string) (*model.Score, error) {
+	query := `SELECT ` + scoreColumnsQuery + ` FROM scores WHERE establishment_id = ?`
+	row := s.db.QueryRowContext(ctx, query, establishmentID)
+
+	sc, err := scanScore(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return nil, ErrNotFound
+		}
+		return nil, err
+	}
+	return sc, nil
+}
+
 func (s *SQLiteStore) ListScores(ctx context.Context) ([]*model.Score, error) {
-	query := `SELECT establishment_id, computed_at, closure_risk, quality_risk, quality_delta, priority, tier, confidence, evidence_count, status, reason, volatile, conflict_detected FROM scores`
+	query := `SELECT ` + scoreColumnsQuery + ` FROM scores`
 	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
@@ -359,27 +435,11 @@ func (s *SQLiteStore) ListScores(ctx context.Context) ([]*model.Score, error) {
 
 	var list []*model.Score
 	for rows.Next() {
-		var sc model.Score
-		var compAt string
-		var tier, status string
-		var vol, confDet int
-
-		err := rows.Scan(
-			&sc.EstablishmentID, &compAt, &sc.ClosureRisk, &sc.QualityRisk, &sc.QualityDelta,
-			&sc.Priority, &tier, &sc.Confidence, &sc.EvidenceCount, &status,
-			&sc.Reason, &vol, &confDet,
-		)
+		sc, err := scanScore(rows)
 		if err != nil {
 			return nil, err
 		}
-		sc.Tier = model.TierLabel(tier)
-		sc.Status = model.StatusSuggested(status)
-		sc.Volatile = vol == 1
-		sc.ConflictDetected = confDet == 1
-		if t, err := time.Parse(time.RFC3339, compAt); err == nil {
-			sc.ComputedAt = t
-		}
-		list = append(list, &sc)
+		list = append(list, sc)
 	}
 	return list, rows.Err()
 }

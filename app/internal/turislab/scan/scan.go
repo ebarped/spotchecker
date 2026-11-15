@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/datadope/turislab-doctor/internal/logx"
+	"github.com/datadope/turislab-doctor/internal/turislab/judge"
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
 	"github.com/datadope/turislab-doctor/internal/turislab/scoring"
 )
@@ -28,6 +29,12 @@ type Source interface {
 	Name() string
 	Enabled() bool
 	Collect(ctx context.Context, est *model.Establishment) ([]*model.Signal, error)
+}
+
+// Judge issues the final verdict from the evidence the engine scored. It
+// is the judge.Judge in production; tests script their own.
+type Judge interface {
+	Review(ctx context.Context, est *model.Establishment, signals []*model.Signal, score *model.Score) (*judge.Verdict, error)
 }
 
 type ScanConfig struct {
@@ -58,6 +65,7 @@ type Scanner struct {
 	store   Store
 	sources []Source
 	scoring *scoring.Engine
+	judge   Judge
 	log     *logx.Logger
 
 	running  atomic.Bool
@@ -67,8 +75,18 @@ type Scanner struct {
 	backoffs map[string]time.Time
 }
 
-func New(cfg ScanConfig, store Store, sources []Source, eng *scoring.Engine, log *logx.Logger) *Scanner {
-	return &Scanner{
+// Option customizes the Scanner.
+type Option func(*Scanner)
+
+// WithJudge attaches the LLM judge: after the engine scores an
+// establishment, the judge reviews the evidence and issues the final
+// verdict. Without it the engine's verdict is the final one.
+func WithJudge(j Judge) Option {
+	return func(s *Scanner) { s.judge = j }
+}
+
+func New(cfg ScanConfig, store Store, sources []Source, eng *scoring.Engine, log *logx.Logger, opts ...Option) *Scanner {
+	s := &Scanner{
 		cfg:      cfg,
 		store:    store,
 		sources:  sources,
@@ -76,6 +94,10 @@ func New(cfg ScanConfig, store Store, sources []Source, eng *scoring.Engine, log
 		log:      log,
 		backoffs: make(map[string]time.Time),
 	}
+	for _, opt := range opts {
+		opt(s)
+	}
+	return s
 }
 
 func (s *Scanner) Start(ctx context.Context) {
@@ -236,6 +258,32 @@ func (s *Scanner) ScanOne(ctx context.Context, establishmentID string) error {
 	}
 
 	score := s.scoring.Compute(target, historicalSigs, prevScore, inspDays)
+
+	// The engine's verdict is kept aside: it is what the judge is measured
+	// against, and what stands as final whenever the judge cannot run.
+	score.HeuristicStatus = score.Status
+	score.HeuristicReason = score.Reason
+
+	// The judge reviews evidence: with none collected there is nothing to
+	// judge, and the engine already reports unknown.
+	if s.judge != nil && score.EvidenceCount > 0 {
+		if verdict, judgeErr := s.judge.Review(ctx, target, historicalSigs, score); judgeErr != nil {
+			score.JudgeError = judgeErr.Error()
+			s.log.Warn("judge", "[%s] el juez LLM falló: %v — se mantiene el veredicto del motor", target.ID, judgeErr)
+		} else {
+			score.Status = verdict.Status
+			score.Reason = verdict.Rationale
+			score.JudgeModel = verdict.Model
+			score.JudgeStatus = verdict.Status
+			score.JudgeReason = verdict.Rationale
+			score.JudgeConfidence = verdict.Confidence
+			if verdict.Status != score.HeuristicStatus {
+				s.log.Info("judge", "[%s] el juez corrige al motor: %s → %s",
+					target.ID, score.HeuristicStatus, verdict.Status)
+			}
+		}
+	}
+
 	s.log.Info("scan", "[%s] score %s · riesgo de cierre %.0f%% · prioridad %.0f/100 · %d evidencias — %s",
 		target.ID, score.Tier, score.ClosureRisk*100, score.Priority, score.EvidenceCount, score.Reason)
 	if prevScore != nil && (prevScore.Status != score.Status || prevScore.Tier != score.Tier) {

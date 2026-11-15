@@ -27,6 +27,31 @@ export interface PhaseTable {
 	title: string;
 	columns: string[];
 	rows: PhaseTableRow[];
+	/** When true, the last column renders a StatusChip pill for
+	 * row.status instead of plain text; cells then omit the status text. */
+	statusColumn?: boolean;
+}
+
+/** One emitted signal of a source card: kind, family and how it reads. */
+export interface SourceSignal {
+	kind: string;
+	family: string;
+	detail: string;
+}
+
+/** Deep-dive card for one evidence source: what it contributes, how it
+ * works internally and which signals it emits. */
+export interface SourceCard {
+	name: string;
+	status: PhaseStatus;
+	/** One line: what this source brings to the table. */
+	what: string;
+	/** How it works inside, step by step. */
+	how: string[];
+	/** Signals it emits and how they translate into evidence. */
+	signals: SourceSignal[];
+	/** Relevant knobs and their defaults. */
+	config: string;
 }
 
 export interface PhaseBarItem {
@@ -50,6 +75,8 @@ export interface PhaseDetail {
 	implemented: string[];
 	todos: string[];
 	table?: PhaseTable;
+	/** Per-source deep-dive cards (phase 2). */
+	sources?: SourceCard[];
 	bars?: { title: string; items: PhaseBarItem[] };
 	note?: string;
 }
@@ -173,50 +200,178 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 		],
 		table: {
 			title: 'Matriz de fuentes',
-			columns: ['Fuente', 'Qué consulta', 'Estado'],
+			columns: ['Fuente', 'Qué hace', 'Cómo se chequea', 'Estado'],
+			statusColumn: true,
 			rows: [
 				{
-					cells: ['website', 'HTTP de la web; estado y keywords de cierre', 'Implementado'],
+					cells: [
+						'website',
+						'GET a la web del local: estado HTTP y keywords de cierre',
+						'Señales web_status / web_keyword'
+					],
 					status: 'done'
 				},
 				{
-					cells: ['osm', 'Overpass a 100 m; disused, closed, vacant, opening_hours', 'Implementado'],
+					cells: [
+						'osm',
+						'Overpass a 100 m del POI: disused, closed, vacant, opening_hours',
+						'Señal osm_tag por cada tag relevante'
+					],
 					status: 'done'
 				},
 				{
-					cells: ['google_maps_scraper', 'gosom/kit; estado, rating y número de reseñas', 'Implementado'],
+					cells: [
+						'google_maps_scraper',
+						'Binario gosom externo: ficha de Google Maps del local',
+						'Señales business_status / rating / review_count'
+					],
 					status: 'done'
 				},
 				{
-					cells: ['google_places', 'API oficial; businessStatus, rating y reseñas', 'Pendiente'],
+					cells: [
+						'google_places',
+						'API oficial de Google: businessStatus, rating y reseñas',
+						'Sin adaptador todavía'
+					],
 					status: 'todo'
 				},
 				{
-					cells: ['overture', 'Parquet local; POI y estado', 'Pendiente'],
+					cells: [
+						'overture',
+						'Dataset abierto (Parquet local): POI y estado',
+						'Se ignora en silencio al construir las fuentes'
+					],
 					status: 'todo'
 				},
 				{
-					cells: ['phone', 'Llamada manual o proveedor (Vapi, Retell, Dograh)', 'Pendiente'],
+					cells: [
+						'phone',
+						'Llamada de verificación manual o por proveedor (Vapi, Retell, Dograh)',
+						'Sin adaptador todavía'
+					],
 					status: 'todo'
 				},
 				{
-					cells: ['registry', 'Registro oficial por API/convenio', 'Pendiente'],
+					cells: [
+						'registry',
+						'Registro oficial por API o convenio',
+						'Sin adaptador todavía'
+					],
 					status: 'todo'
 				},
 				{
-					cells: ['news', 'RSS, GNews o NewsAPI', 'Pendiente'],
+					cells: [
+						'news',
+						'RSS, GNews o NewsAPI: noticias de cierres y traspasos',
+						'Sin adaptador todavía'
+					],
 					status: 'todo'
 				},
 				{
-					cells: ['yelp', 'API de Yelp', 'Pendiente'],
+					cells: [
+						'yelp',
+						'API de Yelp: ficha y reseñas',
+						'Sin adaptador todavía'
+					],
 					status: 'todo'
 				},
 				{
-					cells: ['tripadvisor', 'Terra / Discover', 'Pendiente'],
+					cells: [
+						'tripadvisor',
+						'Scraping Terra / Discover',
+						'Sin adaptador todavía'
+					],
 					status: 'todo'
 				}
 			]
 		},
+		sources: [
+			{
+				name: 'website',
+				status: 'done',
+				what: 'Comprueba que la web del establecimiento responde y busca palabras que delatan un cierre.',
+				how: [
+					'Un único GET a la URL guardada en el registro, con User-Agent propio y timeout configurable (15 s por defecto).',
+					'La petición sigue como máximo 3 redirects; el body se lee con un tope de 512 KB.',
+					'La respuesta se clasifica: ok (2xx), 404, down (conexión rechazada, DNS caído o timeout) o error (cualquier otro código).',
+					'Si la página carga, se busca en el HTML en minúsculas cada keyword configurada ("cerrado", "reformas", "traspaso"…).',
+					'Sin URL en el registro no se emite nada: no es un error de la fuente.'
+				],
+				signals: [
+					{
+						kind: 'web_status',
+						family: 'actividad',
+						detail: 'Valor 1 si la web responde (confianza 0,75, peso 0,30). Una web caída no es un cierre: es un síntoma débil.'
+					},
+					{
+						kind: 'web_keyword',
+						family: 'estado directo',
+						detail: 'Una keyword de cierre aparece en la página: valor 0,5, confianza 0,65, peso 0,50. Es la señal más fuerte de esta fuente.'
+					}
+				],
+				config: 'timeout_seconds 15 · follow_redirects (máx. 3) · keywords [cerrado, reformas, traspaso…] · cache_ttl_days 7'
+			},
+			{
+				name: 'osm',
+				status: 'done',
+				what: 'Consulta OpenStreetMap vía Overpass para ver si la comunidad ha marcado el POI como abandonado o cerrado.',
+				how: [
+					'POST a Overpass con una query around:100 sobre las coordenadas del establecimiento, filtrando nodos con tag amenity o tourism.',
+					'El body se lee con un tope de 4 MB y timeout de 30 s; sin coordenadas, la fuente no hace nada.',
+					'Se recorren los tags de cada elemento: disused:amenity, disused:tourism, closed=yes y shop=vacant.',
+					'Un nodo con opening_hours cuyo nombre contiene el del establecimiento cuenta como actividad confirmada.',
+					'Si no hay ningún elemento cerca, se emite una señal débil not_found en vez de nada.'
+				],
+				signals: [
+					{
+						kind: 'osm_tag: disused / closed / vacant',
+						family: 'estado directo',
+						detail: 'Valor 0,5–0,6 con confianza 0,55 y peso 0,60: la comunidad suele marcar los cierres, pero el dato envejece.'
+					},
+					{
+						kind: 'osm_tag: found_active',
+						family: 'actividad',
+						detail: 'El POI existe y tiene horario: valor 1,0 con confianza 0,55 y peso 0,30.'
+					},
+					{
+						kind: 'osm_tag: not_found',
+						family: 'actividad',
+						detail: 'Nada alrededor del radio: valor 0,0 con confianza 0,40 y peso 0,20.'
+					}
+				],
+				config: 'overpass_url (oficial de Overpass) · timeout_seconds 30 · max_elements 5 · cache_ttl_days 30'
+			},
+			{
+				name: 'google_maps_scraper',
+				status: 'done',
+				what: 'Lanza el binario gosom para leer la ficha de Google Maps del local tal y como la ve un usuario.',
+				how: [
+					'Construye la query "nombre + municipio" (sin dirección: confunde la búsqueda) y la escribe en un fichero temporal de entrada.',
+					'Ejecuta el binario externo con -geo lat,lng para sesgar la búsqueda hacia el establecimiento, -lang es y -exit-on-inactivity para que un bloqueo no cuelgue el scan.',
+					'Lee el JSON de salida (NDJSON, array u objeto suelto), recorta a max_places resultados y respeta el timeout de 120 s.',
+					'Elige el mejor candidato por similitud de nombre normalizado (match exacto 100, contención 80, palabras compartidas): para un local cerrado Google puede responder solo con vecinos, así que el nombre es el discriminador fiable.',
+					'Clasifica el estado del local: "CERRADO" / "cerrado permanentemente" → cierre permanente; "cerrado temporalmente" → temporal; el resto ("Closed ⋅ Opens 13:00", taglines) → abierto. Nunca confunde "cerrado por horario" con cierre.'
+				],
+				signals: [
+					{
+						kind: 'business_status',
+						family: 'estado directo',
+						detail: 'permanently_closed: valor 1,0, confianza 0,75, peso 0,90 — la señal más fuerte del sistema. temporarily_closed: 0,4. open: 0,0.'
+					},
+					{
+						kind: 'rating',
+						family: 'reseñas',
+						detail: 'Nota media de Google en el momento del scrape, confianza 0,70 y peso 0,30.'
+					},
+					{
+						kind: 'review_count',
+						family: 'reseñas',
+						detail: 'Número de reseñas acumuladas, confianza 0,70 y peso 0,20: una caída brusca es un síntoma.'
+					}
+				],
+				config: 'provider gosom · binary (bin/google-maps-scraper) · max_places 3 · depth 1 · lang es · cache_ttl_days 7 · headless'
+			}
+		],
 		implemented: [
 			'Website: estado HTTP (ok, 404, down, error) y keywords de cierre en el HTML.',
 			'OSM: tags disused, closed, vacant y opening_hours vía Overpass.',
@@ -393,10 +548,94 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 			'Documentar y validar los pesos por familia de evidencia.'
 		],
 		note:
-			'Los pesos quality_risk, quality_delta, impact y complaints se leen de la config y entran en la fórmula, pero hoy los dos primeros valen 0 y los dos últimos ni siquiera se suman: la prioridad real se apoya en cierre + antigüedad.'
+			'Los pesos quality_risk, quality_delta, impact y complaints se leen de la config y entran en la fórmula, pero hoy los dos primeros valen 0 y los dos últimos ni siquiera se suman: la prioridad real se apoya en cierre + antigüedad. El estado sugerido que produce este motor es exactamente lo que el juez LLM (fase 5) recibe como referencia antes de firmar el veredicto final.'
 	},
 	{
 		id: 5,
+		slug: 'veredicto-juez',
+		name: 'Veredicto del juez (LLM)',
+		artifact: 'Verdict',
+		status: 'done',
+		tagline: 'Toda la evidencia sobre la mesa y un LLM que firma el estado final.',
+		summary:
+			'Después del motor determinista, un LLM recibe el expediente completo del establecimiento —datos del registro, cada señal con su fuente, antigüedad y confianza, y el veredicto heurístico del motor como referencia— y emite el estado final con una justificación legible. El motor decide quién va primero en la cola (prioridad y tier); el juez decide en qué estado está el local.',
+		facts: [
+			{ label: 'Modelo', value: 'judge.model — vacío reusa agent.model' },
+			{ label: 'Temperatura', value: '0 — el juez quiere determinismo' },
+			{ label: 'Límite por veredicto', value: '60 s (judge.timeout_seconds)' },
+			{ label: 'Señales por expediente', value: '30, las más recientes (judge.max_signals)' }
+		],
+		flow: [
+			{
+				title: 'Veredicto heurístico',
+				body: 'El motor determinista deja su estado sugerido, su motivo y el riesgo de cierre.',
+				status: 'done'
+			},
+			{
+				title: 'Expediente',
+				body: 'Se arma un dossier JSON: registro, señales (fuente, tipo, valor, confianza, edad en días), cuántas fuentes fallaron y el veredicto del motor.',
+				status: 'done'
+			},
+			{
+				title: 'Juez LLM',
+				body: 'El modelo recibe el expediente con un system prompt en español y responde JSON {verdict, confidence, rationale} a temperatura 0.',
+				status: 'done'
+			},
+			{
+				title: 'Veredicto final',
+				body: 'La respuesta se valida (estados permitidos, confianza 0–1, justificación acotada) y sustituye al estado sugerido del motor.',
+				status: 'done'
+			},
+			{
+				title: 'Fallback seguro',
+				body: 'Si el juez falla, se desactiva o responde basura, el veredicto del motor queda como final y el error se guarda.',
+				status: 'done'
+			}
+		],
+		table: {
+			title: 'Vocabulario de veredictos',
+			columns: ['Veredicto', 'Cuándo lo emite el juez'],
+			rows: [
+				{
+					cells: ['active', 'La evidencia apunta a que el establecimiento funciona con normalidad.']
+				},
+				{
+					cells: [
+						'closure_suspected',
+						'Hay señales de cierre (web caída, reseñas congeladas, tags) pero ninguna lo confirma.'
+					]
+				},
+				{
+					cells: [
+						'closure_confirmed',
+						'Una fuente directa (p. ej. Google Maps marcándolo) respalda el cierre permanente.'
+					]
+				},
+				{ cells: ['closed_temporarily', 'Cerrado ahora pero con intención de volver: obras, vacaciones.'] },
+				{ cells: ['seasonal', 'Cierre previsible por temporada, respaldado por el patrón de la evidencia.'] },
+				{ cells: ['unknown', 'Evidencia insuficiente o contradictoria: el juez prefiere no adivinar.'] }
+			]
+		},
+		implemented: [
+			'Paquete judge: dossier de evidencia, system prompt en español y respuesta JSON estricta.',
+			'Parseo tolerante: fences de markdown y prosa alrededor no rompen el veredicto.',
+			'El veredicto del motor se conserva (heuristic_status, heuristic_reason) para comparar decisiones.',
+			'Fallo aislado: el error del juez se guarda (judge_error) y el veredicto del motor se mantiene.',
+			'Modelo compartido con el agente: judge.model vacío reusa agent.model y su API key.',
+			'Solo se juzga con evidencia: sin señales, el veredicto del motor pasa directamente.'
+		],
+		todos: [
+			'Calibrar el prompt contra ground-truth.json (acuerdo entre juez y realidad).',
+			'Métricas de acuerdo y desacuerdo juez-motor en /metrics.',
+			'Cachear veredictos para no re-juzgar expedientes que no han cambiado.',
+			'Auto-consistencia: varios veredictos por expediente y votación.',
+			'Exponer el coste acumulado del juez en el scan.'
+		],
+		note:
+			'El juez decide solo el estado final; la prioridad y el tier siguen siendo del motor determinista, así que la posición en la cola nunca depende de una llamada al modelo. Un local sin ninguna señal ni score tampoco se juzga.'
+	},
+	{
+		id: 6,
 		slug: 'colas-tiers',
 		name: 'Gestión de colas y tiers',
 		artifact: 'QueueItem',
@@ -468,7 +707,7 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 			'El orden y los tiers están cerrados; lo que falta es la capa operativa: rutas, asignación y coste.'
 	},
 	{
-		id: 6,
+		id: 7,
 		slug: 'exposicion-supervision',
 		name: 'Exposición y supervisión',
 		artifact: 'Report',
@@ -512,18 +751,19 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 		table: {
 			title: 'Superficie expuesta',
 			columns: ['Endpoint', 'Qué devuelve', 'Estado'],
+			statusColumn: true,
 			rows: [
-				{ cells: ['GET /api/report', 'Informe completo', 'Implementado'], status: 'done' },
-				{ cells: ['GET /api/report/export', 'El mismo JSON como descarga', 'Implementado'], status: 'done' },
-				{ cells: ['GET /api/summary', 'Conteos por tier y estado', 'Implementado'], status: 'done' },
-				{ cells: ['GET /api/queue', 'Cola filtrable', 'Implementado'], status: 'done' },
-				{ cells: ['GET /api/establishments', 'Lista de establecimientos', 'Implementado'], status: 'done' },
-				{ cells: ['POST /api/establishments/{id}/refresh', 'Re-escaneo en segundo plano', 'Implementado'], status: 'done' },
-				{ cells: ['GET /api/scan/status', 'Estado del scanner', 'Implementado'], status: 'done' },
-				{ cells: ['GET /api/pipeline', 'Las fases del pipeline', 'Implementado'], status: 'done' },
-				{ cells: ['GET /metrics', 'Métricas Prometheus', 'Implementado'], status: 'done' },
-				{ cells: ['/api/agent/*', 'Info, catálogo y chat SSE', 'Implementado si enabled'], status: 'done' },
-				{ cells: ['Autenticación', 'Control de acceso a la API/UI', 'Pendiente'], status: 'todo' }
+				{ cells: ['GET /api/report', 'Informe completo'], status: 'done' },
+				{ cells: ['GET /api/report/export', 'El mismo JSON como descarga'], status: 'done' },
+				{ cells: ['GET /api/summary', 'Conteos por tier y estado'], status: 'done' },
+				{ cells: ['GET /api/queue', 'Cola filtrable'], status: 'done' },
+				{ cells: ['GET /api/establishments', 'Lista de establecimientos'], status: 'done' },
+				{ cells: ['POST /api/establishments/{id}/refresh', 'Re-escaneo en segundo plano'], status: 'done' },
+				{ cells: ['GET /api/scan/status', 'Estado del scanner'], status: 'done' },
+				{ cells: ['GET /api/pipeline', 'Las fases del pipeline'], status: 'done' },
+				{ cells: ['GET /metrics', 'Métricas Prometheus'], status: 'done' },
+				{ cells: ['/api/agent/*', 'Info, catálogo y chat SSE'], status: 'done' },
+				{ cells: ['Autenticación', 'Control de acceso a la API/UI'], status: 'todo' }
 			]
 		},
 		implemented: [

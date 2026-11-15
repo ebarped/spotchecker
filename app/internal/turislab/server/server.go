@@ -174,8 +174,9 @@ func (s *Server) Handler() http.Handler {
 					{"id": 2, "name": "Recogida de señales", "what": "Scraping de Google Maps (gosom), OSM, y verificación de web.", "artifact": "Signal"},
 					{"id": 3, "name": "Procesamiento de evidencia", "what": "Aplicación de TTL, confianza y decaimiento temporal.", "artifact": "Evidence"},
 					{"id": 4, "name": "Motor de puntuación", "what": "Cálculo de closure_risk, quality_risk, quality_delta y prioridad.", "artifact": "Score"},
-					{"id": 5, "name": "Gestión de colas y tiers", "what": "Asignación de P0-P3 según prioridad y confianza con histéresis.", "artifact": "QueueItem"},
-					{"id": 6, "name": "Exposición y supervisión", "what": "API REST y panel SvelteKit para inspectores.", "artifact": "Report"},
+					{"id": 5, "name": "Veredicto del juez (LLM)", "what": "Un LLM revisa el expediente de evidencia y emite el estado final.", "artifact": "Verdict"},
+					{"id": 6, "name": "Gestión de colas y tiers", "what": "Asignación de P0-P3 según prioridad y confianza con histéresis.", "artifact": "QueueItem"},
+					{"id": 7, "name": "Exposición y supervisión", "what": "API REST y panel SvelteKit para inspectores.", "artifact": "Report"},
 				},
 			})
 		})

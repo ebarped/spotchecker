@@ -29,12 +29,12 @@
 	<header class="mb-8">
 		<h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">Cómo funciona</h1>
 		<p class="mt-2 max-w-2xl text-sm text-muted">
-			El pipeline completo, de los datos en bruto a la cola priorizada de inspecciones. Seis
+			El pipeline completo, de los datos en bruto a la cola priorizada de inspecciones. Siete
 			fases, cada una con su artefacto. Entra en cualquier fase para ver qué hace hoy el
 			sistema, qué está a medias y qué queda como TODO.
 		</p>
 		<nav class="mt-3 text-xs">
-			<a href="/turislab" class="glass glass-hover rounded-full px-3 py-1 text-muted">
+			<a href="/" class="glass glass-hover rounded-full px-3 py-1 text-muted">
 				← Volver a la cola
 			</a>
 		</nav>

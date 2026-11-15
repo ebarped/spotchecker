@@ -235,6 +235,27 @@ agent:
   suggestions: []                 # [] = prompts por defecto. Opciones: lista de cadenas.
 
 # -----------------------------------------------------------------------------
+# Juez LLM (veredicto final)
+# -----------------------------------------------------------------------------
+# Tras el motor determinista, un LLM revisa el expediente de evidencia de cada
+# establecimiento (registro + señales con fuente y antigüedad + veredicto del
+# motor) y emite el estado FINAL con su justificación. Si falla o está
+# desactivado, el veredicto del motor se mantiene; la prioridad y el tier
+# SIEMPRE son del motor, así que la cola no depende del LLM. Solo se juzga con
+# evidencia: sin señales, el veredicto del motor pasa directamente.
+judge:
+  enabled: false                 # [PoC] false por defecto. Opciones: true | false. [Prod] true con coste acotado.
+  # Modelo del juez. Vacío => reusa agent.model (mismo endpoint y clave), así
+  # ambas features comparten configuración. Al rellenar name se desacopla.
+  model:
+    provider: openai            # Proveedor. Opciones: openai | gemini.
+    name: ""                     # [PoC] "" = reusa agent.model. Opciones: el nombre exacto que acepte el endpoint.
+    base_url: ""                 # "" = el de agent.model si se reusa; o endpoint compatible OpenAI.
+    api_key_env: LITELLM_API_KEY # NOMBRE de la env var con la clave. Opciones: cualquier nombre válido; nunca la clave literal.
+  timeout_seconds: 60           # Límite por veredicto; al superarlo se conserva el del motor. Opciones: 10-120. [Prod] 30-60.
+  max_signals: 30               # Señales por expediente, las más recientes. Opciones: 5-100. [Prod] 30-50.
+
+# -----------------------------------------------------------------------------
 # Métricas y logs
 # -----------------------------------------------------------------------------
 metrics:

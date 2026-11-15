@@ -50,6 +50,15 @@ export interface Score {
 	reason: string;
 	volatile: boolean;
 	conflict_detected: boolean;
+	/** What the deterministic engine decided; the judge compares against it. */
+	heuristic_status: SuggestedStatus;
+	heuristic_reason: string;
+	/** LLM judge fields — absent when it did not run (judge.enabled off or failure). */
+	judge_model?: string;
+	judge_status?: SuggestedStatus;
+	judge_reason?: string;
+	judge_confidence?: number;
+	judge_error?: string;
 }
 
 export interface QueueItem {
@@ -122,6 +131,17 @@ export const TIER_LABELS: Record<Tier, string> = {
 	P2: 'P2 · Programar visita',
 	P3: 'P3 · Vigilar',
 	collect_data: 'Datos insuficientes',
+	por_procesar: 'Sin escanear'
+};
+
+/** Compact tier labels for chart legends and axes: the same wording as the
+ * queue, shortened so six entries fit on the small charts. */
+export const TIER_CHART_LABELS: Record<Tier, string> = {
+	P0: 'P0 · Visitar ya',
+	P1: 'P1 · Visitar pronto',
+	P2: 'P2 · Programar',
+	P3: 'P3 · Vigilar',
+	collect_data: 'Datos insuf.',
 	por_procesar: 'Sin escanear'
 };
 

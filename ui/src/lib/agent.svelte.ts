@@ -165,7 +165,7 @@ class AgentController {
 			} else {
 				reply.error = true;
 				if (reply.text === '') {
-					reply.text = `The chat failed: ${error instanceof Error ? error.message : String(error)}`;
+					reply.text = `El chat falló: ${error instanceof Error ? error.message : String(error)}`;
 				}
 			}
 		} finally {

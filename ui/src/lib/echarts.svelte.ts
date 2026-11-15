@@ -72,6 +72,42 @@ export function chartPalette(): ChartPalette {
 	};
 }
 
+/** Year of a hex colour as [r, g, b]. Returns null for formats we cannot
+ * mix (the theme tokens are hex, so this is enough). */
+function hexToRgb(hex: string): [number, number, number] | null {
+	const match = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim());
+	if (!match) return null;
+	let value = match[1];
+	if (value.length === 3) value = [...value].map((c) => c + c).join('');
+	return [
+		parseInt(value.slice(0, 2), 16),
+		parseInt(value.slice(2, 4), 16),
+		parseInt(value.slice(4, 6), 16)
+	];
+}
+
+/** Mixes two hex colours: t = 0 returns a, t = 1 returns b. */
+function mixHex(a: string, b: string, t: number): string {
+	const from = hexToRgb(a);
+	const to = hexToRgb(b);
+	if (!from || !to) return a;
+	const mixed = from.map((channel, i) => Math.round(channel + (to[i] - channel) * t));
+	return `#${mixed.map((c) => c.toString(16).padStart(2, '0')).join('')}`;
+}
+
+/** Five-step urgency ramp for the closure-risk histogram: green means "no
+ * risk", amber the middle and red "closure likely". The intermediate stops
+ * are mixed from the theme's status colours, so the ramp follows the theme. */
+export function riskRamp(pal: ChartPalette): string[] {
+	return [
+		pal.ok,
+		mixHex(pal.ok, pal.partial, 0.55),
+		pal.partial,
+		mixHex(pal.partial, pal.ko, 0.55),
+		pal.ko
+	];
+}
+
 /** Tooltip chrome shared by every chart. confine keeps the popup inside
  * its chart rect — charts in narrow cards (the agent graph) would
  * otherwise spill the tooltip off the screen. */

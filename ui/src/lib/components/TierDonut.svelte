@@ -1,7 +1,13 @@
 <script lang="ts">
 	import type { EChartsOption } from 'echarts';
 	import { chartPalette, legend, tooltip } from '../echarts.svelte';
-	import { TIERS, tierCounts, type Tier, type TurislabReport } from '../turislab';
+	import {
+		TIERS,
+		TIER_CHART_LABELS,
+		tierCounts,
+		type Tier,
+		type TurislabReport
+	} from '../turislab';
 	import EChart from './EChart.svelte';
 
 	let { report }: { report: TurislabReport } = $props();
@@ -21,32 +27,29 @@
 
 	const counts = $derived(tierCounts(report.queue));
 
-	const SHORT: Record<Tier, string> = {
-		P0: 'P0',
-		P1: 'P1',
-		P2: 'P2',
-		P3: 'P3',
-		collect_data: 'Datos insuf.',
-		por_procesar: 'Sin escanear'
-	};
-
 	const data = $derived(
 		TIERS.map((tier) => ({
-			name: SHORT[tier],
+			name: TIER_CHART_LABELS[tier],
 			value: counts[tier],
 			itemStyle: { color: tierColor[tier] }
 		}))
 	);
 	const covered = $derived(Math.round(report.summary.coverage_pct));
 
+	// The donut sits above the legend instead of centred: with six
+	// descriptive labels the legend wraps to two or three rows, and a
+	// centred donut would grow into it on narrow cards.
+	const CENTER_Y = '42%';
+
 	const option = $derived.by<EChartsOption>(() => ({
 		tooltip: { ...tooltip(pal), valueFormatter: (value) => `${value} establecimientos` },
-		legend: legend(pal),
+		// Smaller gap than the default: the labels are longer now.
+		legend: { ...legend(pal), itemGap: 10 },
 		series: [
 			{
 				type: 'pie',
-				radius: ['64%', '84%'],
-				center: ['50%', '42%'],
+				radius: ['46%', '64%'],
+				center: ['50%', CENTER_Y],
 				padAngle: 2,
 				itemStyle: { borderRadius: 4, borderColor: pal.overlay, borderWidth: 2 },
 				label: { show: false },
@@ -58,8 +61,11 @@
 </script>
 
 <div class="relative">
-	<EChart {option} height={250} />
-	<div class="pointer-events-none absolute inset-x-0 top-[30%] flex flex-col items-center">
+	<EChart {option} height={280} />
+	<div
+		class="pointer-events-none absolute inset-x-0 flex -translate-y-1/2 flex-col items-center"
+		style="top: {CENTER_Y}"
+	>
 		<span class="text-3xl font-semibold tracking-tight">{covered}%</span>
 		<span class="text-xs text-muted">con datos</span>
 	</div>

@@ -33,7 +33,7 @@
 		<a href="/how-it-works" class="glass glass-hover rounded-full px-3 py-1 text-muted">
 			← Cómo funciona
 		</a>
-		<a href="/turislab" class="glass glass-hover rounded-full px-3 py-1 text-muted">
+		<a href="/" class="glass glass-hover rounded-full px-3 py-1 text-muted">
 			Cola de inspección
 		</a>
 	</nav>
@@ -41,7 +41,7 @@
 	{#if !detail}
 		<section class="glass mx-auto mt-10 max-w-2xl rounded-2xl p-8 text-center">
 			<h1 class="text-2xl font-semibold">Esa fase no existe</h1>
-			<p class="mt-2 text-sm text-muted">El pipeline tiene seis fases; esta no es una de ellas.</p>
+			<p class="mt-2 text-sm text-muted">El pipeline tiene siete fases; esta no es una de ellas.</p>
 			<a
 				href="/how-it-works"
 				class="mt-4 inline-block rounded-xl border border-line bg-surface-2 px-4 py-2 text-sm transition-colors hover:border-line-strong"
@@ -149,10 +149,73 @@
 											{cell}
 										</td>
 									{/each}
+									{#if detail.table.statusColumn && row.status}
+										<td class="px-5 py-3 text-right">
+											<StatusChip status={row.status} />
+										</td>
+									{/if}
 								</tr>
 							{/each}
 						</tbody>
 					</table>
+				</div>
+			</section>
+		{/if}
+
+		{#if detail.sources}
+			<section class="mt-8">
+				<h2 class="text-lg font-semibold">Las fuentes, en detalle</h2>
+				<p class="mt-1 text-sm text-muted">
+					Qué aporta cada adaptador, cómo funciona por dentro y qué señales emite.
+				</p>
+				<div class="mt-4 space-y-4">
+					{#each detail.sources as source (source.name)}
+						<article class="glass rounded-2xl p-5">
+							<div class="flex flex-wrap items-center justify-between gap-2">
+								<h3 class="mono text-sm font-semibold text-ink">{source.name}</h3>
+								<StatusChip status={source.status} />
+							</div>
+							<p class="mt-2 text-sm font-medium">{source.what}</p>
+							<div class="mt-4 grid items-start gap-4 lg:grid-cols-2">
+								<div>
+									<h4 class="text-[11px] font-semibold tracking-wider uppercase text-faint">
+										Cómo funciona
+									</h4>
+									<ul class="mt-2 space-y-1.5 text-xs leading-relaxed text-muted">
+										{#each source.how as step (step)}
+											<li class="flex gap-2">
+												<span class="mt-1.5 size-1.5 shrink-0 rounded-full bg-accent"></span>
+												<span>{step}</span>
+											</li>
+										{/each}
+									</ul>
+								</div>
+								<div>
+									<h4 class="text-[11px] font-semibold tracking-wider uppercase text-faint">
+										Señales que emite
+									</h4>
+									<dl class="mt-2 space-y-2 text-xs">
+										{#each source.signals as sig (sig.kind)}
+											<div class="rounded-xl bg-surface-2 p-3">
+												<dt class="flex flex-wrap items-baseline gap-2">
+													<span class="mono font-semibold text-ink">{sig.kind}</span>
+													<span
+														class="rounded-full bg-accent/10 px-2 py-0.5 text-[10px] font-medium text-accent"
+													>
+														{sig.family}
+													</span>
+												</dt>
+												<dd class="mt-1 leading-relaxed text-muted">{sig.detail}</dd>
+											</div>
+										{/each}
+									</dl>
+								</div>
+							</div>
+							<p class="mono mt-4 rounded-lg bg-surface-2 px-3 py-2 text-[11px] text-faint">
+								{source.config}
+							</p>
+						</article>
+					{/each}
 				</div>
 			</section>
 		{/if}

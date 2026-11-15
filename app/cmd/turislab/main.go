@@ -9,6 +9,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io/fs"
@@ -22,6 +23,7 @@ import (
 	"github.com/datadope/turislab-doctor/internal/logx"
 	"github.com/datadope/turislab-doctor/internal/turislab/agent"
 	"github.com/datadope/turislab-doctor/internal/turislab/config"
+	"github.com/datadope/turislab-doctor/internal/turislab/judge"
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
 	"github.com/datadope/turislab-doctor/internal/turislab/scan"
 	"github.com/datadope/turislab-doctor/internal/turislab/scoring"
@@ -105,6 +107,19 @@ func main() {
 	srcs := buildSources(cfg)
 	eng := scoring.NewEngine(scoringConfig(cfg))
 
+	// The LLM judge reviews the evidence after the engine scores it and
+	// issues the final verdict. Optional: without it the engine's verdict
+	// is the final one.
+	judgeSvc, err := buildJudge(cfg, log)
+	if err != nil {
+		log.Error("judge", "%v", err)
+		os.Exit(1)
+	}
+	var scanOpts []scan.Option
+	if judgeSvc != nil {
+		scanOpts = append(scanOpts, scan.WithJudge(judgeSvc))
+	}
+
 	scanCfg := scan.ScanConfig{
 		TriggerInterval:      cfg.Scan.TriggerInterval.Duration,
 		TargetsPerTick:       cfg.Scan.TargetsPerTick,
@@ -115,7 +130,7 @@ func main() {
 		StaleAfterDays:       cfg.Scan.StaleAfterDays,
 		PauseBetween:         cfg.Scan.TriggerInterval.Duration,
 	}
-	scanner := scan.New(scanCfg, db, asScanSources(srcs), eng, log)
+	scanner := scan.New(scanCfg, db, asScanSources(srcs), eng, log, scanOpts...)
 
 	if *establishment != "" {
 		if err := scanner.ScanOne(ctx, *establishment); err != nil {
@@ -305,6 +320,47 @@ func scoringConfig(cfg config.Config) scoring.ScoringConfig {
 		}
 	}
 	return sc
+}
+
+// buildJudge builds the LLM judge when the configuration enables it. The
+// judge model defaults to the agent's, so one endpoint serves both; a nil
+// Judge means the feature stays off.
+func buildJudge(cfg config.Config, log *logx.Logger) (*judge.Judge, error) {
+	if !cfg.Judge.Enabled {
+		return nil, nil
+	}
+	mc := cfg.Judge.Model
+	if mc.Name == "" {
+		mc = cfg.Agent.Model
+	}
+	if mc.Name == "" {
+		return nil, errors.New("judge: no model configured (set judge.model or agent.model)")
+	}
+	am := agent.ModelConfig{
+		Provider:  mc.Provider,
+		Name:      mc.Name,
+		BaseURL:   mc.BaseURL,
+		APIKeyEnv: mc.APIKeyEnv,
+	}
+	// Fail fast on a missing key, like the agent does: a credential gap
+	// should stop the startup, not the first scan.
+	if agent.ResolveAPIKey(am) == "" {
+		return nil, fmt.Errorf(
+			"judge model: set judge.model.api_key or the environment variable %s (judge.model.api_key_env)",
+			mc.APIKeyEnv)
+	}
+	factory, err := agent.ModelFactory(am)
+	if err != nil {
+		return nil, err
+	}
+	timeout := time.Duration(cfg.Judge.TimeoutSeconds) * time.Second
+	j := judge.New(judge.Config{
+		ModelName:  mc.Name,
+		Timeout:    timeout,
+		MaxSignals: cfg.Judge.MaxSignals,
+	}, factory, log)
+	log.Info("judge", "montado sobre %s — revisa la evidencia y emite el veredicto final", mc.Name)
+	return j, nil
 }
 
 // refreshLoop rebuilds the in-memory report every 10 seconds from the store.
