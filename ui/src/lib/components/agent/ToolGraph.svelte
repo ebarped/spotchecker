@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { SvelteFlow, Controls, type Node, type Edge } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
-	import { agent } from '../../agent.svelte';
+	import { agent, type FlowNode as AgentFlowNode } from '../../agent.svelte';
 	import AutoFit from './AutoFit.svelte';
 	import FlowNode from './FlowNode.svelte';
 
@@ -16,6 +16,30 @@
 	let width = $state(0);
 	let height = $state(0);
 
+	/** Emoji per tool: the node shows the icon plus the tool name. External
+	 * MCP tools we do not know fall back to the generic wrench. */
+	const TOOL_ICONS: Record<string, string> = {
+		get_report_summary: '📊',
+		list_establishments: '📋',
+		get_establishment_detail: '🔎',
+		explain_establishment: '💡'
+	};
+
+	function label(node: AgentFlowNode): string {
+		if (node.kind === 'user') return 'Question';
+		if (node.kind === 'answer') return 'Answer';
+		if (node.kind === 'error') return '⚠️ Error';
+		const name = node.name ?? 'tool';
+		return `${TOOL_ICONS[name] ?? '🔧'} ${name}`;
+	}
+
+	function category(node: AgentFlowNode): 'question' | 'tool' | 'answer' | 'error' {
+		if (node.kind === 'user') return 'question';
+		if (node.kind === 'answer') return 'answer';
+		if (node.kind === 'error') return 'error';
+		return 'tool';
+	}
+
 	/** The traversal as Svelte Flow nodes: one per event, stacked vertically. */
 	const flowNodes = $derived.by<Node[]>(() =>
 		agent.flow.map((node, index) => ({
@@ -23,13 +47,8 @@
 			type: 'flow',
 			position: { x: 0, y: index * 96 },
 			data: {
-				label:
-					node.kind === 'user'
-						? 'Pregunta'
-						: node.kind === 'answer'
-							? 'Respuesta'
-							: `tool: ${node.name ?? ''}`,
-				category: node.kind === 'user' ? 'Pregunta' : node.kind === 'answer' ? 'answer' : (node.category ?? 'tool'),
+				label: label(node),
+				category: category(node),
 				description: node.description ?? ''
 			}
 		}))
