@@ -1,9 +1,10 @@
-// Package seed loads base-de-datos.json into the store.
+// Package seed loads establishment records into the store.
 //
-// On startup, the seeder reads the input JSON file,  normalises each entry
-// (generating a deterministic ID when the source lacks one, applying Unicode
-// normalisation, etc.) and upserts it into the store.  Existing records are
-// updated; new records are inserted.
+// On startup the seeder either reads one JSON/NDJSON file (Options.Path) or,
+// when Options.DatasetsDir is set, every *.csv file in that directory
+// (Options.DatasetsDir). Each record is normalised (deterministic ID when the
+// source lacks one, default country, category cleanup) and upserted: existing
+// records are updated, new records are inserted.
 package seed
 
 import (
@@ -25,8 +26,14 @@ type Store interface {
 
 // Options configures the seed operation.
 type Options struct {
-	// Path is the path to base-de-datos.json.
+	// Path is the path to a single JSON/NDJSON input file. Ignored when
+	// DatasetsDir is set.
 	Path string
+
+	// DatasetsDir, when set, makes Load list every *.csv file in that
+	// directory (sorted by name) and upsert the records from all of them.
+	// It takes precedence over Path and Format.
+	DatasetsDir string
 
 	// Format is the file format ("json", "ndjson"). Defaults to "json".
 	Format string
@@ -40,9 +47,18 @@ type Options struct {
 	DefaultCountry string
 }
 
+// FileResult summarises the records loaded from one dataset file.
+type FileResult struct {
+	Path    string
+	Total   int
+	Loaded  int
+	Skipped int
+	Errors  []string
+}
+
 // Result summarises a completed seed operation.
 type Result struct {
-	// Total is the total number of records in the input file.
+	// Total is the total number of records across all input files.
 	Total int
 
 	// Loaded is the number of records successfully upserted.
@@ -54,11 +70,24 @@ type Result struct {
 
 	// Errors contains validation error messages for skipped records.
 	Errors []string
+
+	// Files holds one entry per file processed, in processing order.
+	Files []FileResult
 }
 
-// Load reads the input file and upserts all valid establishments into the
-// store.  It returns a Result describing what happened.
+// Load reads the configured input and upserts all valid establishments into
+// the store. With DatasetsDir it loads every CSV in the directory; otherwise
+// it loads the single file at Path. It returns a Result describing what
+// happened.
 func Load(ctx context.Context, s Store, opts Options) (Result, error) {
+	if opts.DatasetsDir != "" {
+		return loadDatasets(ctx, s, opts)
+	}
+	return loadFile(ctx, s, opts)
+}
+
+// loadFile reads the single JSON/NDJSON input file.
+func loadFile(ctx context.Context, s Store, opts Options) (Result, error) {
 	if opts.Format == "" {
 		opts.Format = "json"
 	}
@@ -91,7 +120,7 @@ func Load(ctx context.Context, s Store, opts Options) (Result, error) {
 	res.Total = len(raws)
 
 	for i, raw := range raws {
-		est, err := parseEstablishment(raw, opts.DefaultCountry, i)
+		est, err := parseEstablishment(raw, opts.DefaultCountry)
 		if err != nil {
 			msg := fmt.Sprintf("record %d: %v", i, err)
 			if opts.StrictValidation {
@@ -111,32 +140,36 @@ func Load(ctx context.Context, s Store, opts Options) (Result, error) {
 	return res, nil
 }
 
-// parseEstablishment deserialises one raw JSON message, applies defaults and
-// generates an ID when needed.
-func parseEstablishment(raw json.RawMessage, defaultCountry string, idx int) (*model.Establishment, error) {
+// parseEstablishment deserialises one raw JSON message and normalises it.
+func parseEstablishment(raw json.RawMessage, defaultCountry string) (*model.Establishment, error) {
 	var e model.Establishment
 	if err := json.Unmarshal(raw, &e); err != nil {
 		return nil, fmt.Errorf("unmarshal: %w", err)
 	}
+	if err := normalise(&e, defaultCountry); err != nil {
+		return nil, err
+	}
+	return &e, nil
+}
 
-	// Normalise name.
+// normalise applies the defaults shared by the JSON and CSV loaders: trims
+// the name, fills in the country, generates a deterministic ID when needed
+// and normalises the category.
+func normalise(e *model.Establishment, defaultCountry string) error {
 	e.Name = strings.TrimSpace(e.Name)
 	if e.Name == "" {
-		return nil, fmt.Errorf("name is empty")
+		return fmt.Errorf("name is empty")
 	}
 
-	// Apply default country.
 	if e.Country == "" && defaultCountry != "" {
 		e.Country = defaultCountry
 	}
 
-	// Generate deterministic ID when missing.
 	if strings.TrimSpace(e.ID) == "" {
-		e.ID = deterministicID(e)
+		e.ID = deterministicID(*e)
 		e.IDGenerated = true
 	}
 
-	// Validate category.
 	switch e.Category {
 	case model.CategoryRestaurant, model.CategoryHotel, model.CategoryBar, model.CategoryOther:
 		// ok
@@ -147,7 +180,7 @@ func parseEstablishment(raw json.RawMessage, defaultCountry string, idx int) (*m
 		e.Category = model.CategoryOther
 	}
 
-	return &e, nil
+	return nil
 }
 
 // deterministicID returns a short SHA-256-based ID for an establishment that

@@ -33,9 +33,10 @@ database:
 # Entrada de datos
 # -----------------------------------------------------------------------------
 input:
-  path: ./base-de-datos.json      # [PoC] los 10 establecimientos. [Prod] export oficial o tabla del registro turístico.
-  format: json                    # Formato del fichero. Opciones: json | csv | ndjson. [Prod] el que exporte el organismo.
-  ground_truth_path: ./ground-truth.json  # [PoC] verdad terreno para validar. [Prod] "" o null: no se usa para puntuar.
+  datasets_dir: ./app/datasets    # [PoC] al arrancar carga TODOS los .csv de esta carpeta (por orden de nombre). "" desactiva este modo.
+  path: ""                        # Fichero único alternativo (JSON/NDJSON), sólo cuando datasets_dir está vacío.
+  format: json                    # Formato del fichero único. Opciones: json | ndjson.
+  ground_truth_path: ""           # Verdad terreno para `--validate`; no se usa para puntuar. Indica la ruta si quieres validar.
   default_country: ""             # [PoC] "" = no asumir país. [Prod] "ES" u otro ISO-3166 alpha-2.
   reload_interval: 0s             # Cada cuánto se relee el fichero. Opciones: "0s" (solo al arrancar) o "1h", "24h". [Prod] "24h" si cambia.
   strict_validation: true         # true = rechaza registros inválidos. Opciones: true | false. [Prod] true con informe de descartes.

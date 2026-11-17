@@ -170,7 +170,7 @@ func (s *Server) Handler() http.Handler {
 		r.Get("/pipeline", func(w http.ResponseWriter, req *http.Request) {
 			writeJSON(w, http.StatusOK, map[string]any{
 				"phases": []map[string]any{
-					{"id": 1, "name": "Ingesta y normalización", "what": "Carga base-de-datos.json y normaliza coordenadas y nombres.", "artifact": "Establishment"},
+					{"id": 1, "name": "Ingesta y normalización", "what": "Carga los CSV de datasets/ y normaliza coordenadas y nombres.", "artifact": "Establishment"},
 					{"id": 2, "name": "Recogida de señales", "what": "Scraping de Google Maps (gosom), OSM, y verificación de web.", "artifact": "Signal"},
 					{"id": 3, "name": "Procesamiento de evidencia", "what": "Aplicación de TTL, confianza y decaimiento temporal.", "artifact": "Evidence"},
 					{"id": 4, "name": "Motor de puntuación", "what": "Cálculo de closure_risk, quality_risk, quality_delta y prioridad.", "artifact": "Score"},

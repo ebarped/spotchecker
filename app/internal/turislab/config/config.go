@@ -61,6 +61,7 @@ type DatabaseConfig struct {
 
 type InputConfig struct {
 	Path             string   `yaml:"path"`
+	DatasetsDir      string   `yaml:"datasets_dir"`
 	Format           string   `yaml:"format"`
 	GroundTruthPath  string   `yaml:"ground_truth_path"`
 	DefaultCountry   string   `yaml:"default_country"`
@@ -319,9 +320,8 @@ func Default() Config {
 			AutoMigrate:  true,
 		},
 		Input: InputConfig{
-			Path:             "./base-de-datos.json",
+			DatasetsDir:      "./datasets",
 			Format:           "json",
-			GroundTruthPath:  "./ground-truth.json",
 			DefaultCountry:   "ES",
 			StrictValidation: true,
 		},
@@ -433,6 +433,7 @@ func (c *Config) resolvePaths(baseDir string) {
 		c.Database.DSN = resolve(c.Database.DSN)
 	}
 	c.Input.Path = resolve(c.Input.Path)
+	c.Input.DatasetsDir = resolve(c.Input.DatasetsDir)
 	c.Input.GroundTruthPath = resolve(c.Input.GroundTruthPath)
 	c.Sources.GoogleMapsScraper.Binary = resolve(c.Sources.GoogleMapsScraper.Binary)
 	c.Sources.Overture.LocalPath = resolve(c.Sources.Overture.LocalPath)

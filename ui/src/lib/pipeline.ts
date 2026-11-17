@@ -98,7 +98,7 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 		summary:
 			'El seeder lee el export del registro turístico, valida cada registro y lo deja en SQLite con un identificador estable. La carga es idempotente: volver a importar el mismo fichero actualiza, no duplica.',
 		facts: [
-			{ label: 'Entrada', value: 'base-de-datos.json (JSON o NDJSON)' },
+			{ label: 'Entrada', value: 'datasets/*.csv (todos al arrancar)' },
 			{ label: 'Destino', value: 'SQLite — database.dsn' },
 			{ label: 'Idempotencia', value: 'upsert por id' },
 			{ label: 'Registros inválidos', value: 'se saltan (o fallan en strict)' }

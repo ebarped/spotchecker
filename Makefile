@@ -44,7 +44,7 @@ run: build ## Run the scanner + API + UI on :$(PORT)
 scan-once: build ## Scan every establishment once and exit
 	./$(BIN) --config $(CONFIG) --once
 
-validate: build ## Compare the latest scores with ground-truth.json
+validate: build ## Compare scores with input.ground_truth_path (set it in the config)
 	./$(BIN) --config $(CONFIG) --validate
 
 # The gosom scraper is an MIT-licensed standalone binary (no API key). The

@@ -16,6 +16,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sort"
 	"syscall"
 	"time"
@@ -55,7 +56,10 @@ func main() {
 		os.Exit(1)
 	}
 	if *inputPath != "" {
+		// An explicit input file selects the single-file loader instead of
+		// the CSV datasets directory.
 		cfg.Input.Path = *inputPath
+		cfg.Input.DatasetsDir = ""
 	}
 	log.Info("config", "loaded %s (sources: %v)", *cfgPath, cfg.EnabledSources())
 
@@ -72,6 +76,7 @@ func main() {
 
 	res, err := seed.Load(ctx, db, seed.Options{
 		Path:             cfg.Input.Path,
+		DatasetsDir:      cfg.Input.DatasetsDir,
 		Format:           cfg.Input.Format,
 		StrictValidation: cfg.Input.StrictValidation,
 		DefaultCountry:   cfg.Input.DefaultCountry,
@@ -79,6 +84,12 @@ func main() {
 	if err != nil {
 		log.Error("", "seed: %v", err)
 		os.Exit(1)
+	}
+	if cfg.Input.DatasetsDir != "" {
+		log.Info("seed", "datasets dir: %s (%d csv files)", cfg.Input.DatasetsDir, len(res.Files))
+		for _, file := range res.Files {
+			log.Info("seed", "  %s: %d/%d registros (%d omitidos)", filepath.Base(file.Path), file.Loaded, file.Total, file.Skipped)
+		}
 	}
 	log.Info("seed", "loaded %d/%d establishments (%d skipped)", res.Loaded, res.Total, res.Skipped)
 

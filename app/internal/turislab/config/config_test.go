@@ -23,6 +23,7 @@ database:
   dsn: ./data/turislab.db
 input:
   path: ../base.json
+  datasets_dir: ../datasets
   ground_truth_path: ../ground-truth.json
 sources:
   google_maps_scraper:
@@ -43,6 +44,9 @@ legal:
 	}
 	if want := filepath.Join(dir, "../base.json"); cfg.Input.Path != want {
 		t.Errorf("input path = %q, want %q", cfg.Input.Path, want)
+	}
+	if want := filepath.Join(dir, "../datasets"); cfg.Input.DatasetsDir != want {
+		t.Errorf("datasets dir = %q, want %q", cfg.Input.DatasetsDir, want)
 	}
 	if want := filepath.Join(dir, "../ground-truth.json"); cfg.Input.GroundTruthPath != want {
 		t.Errorf("ground truth = %q, want %q", cfg.Input.GroundTruthPath, want)
