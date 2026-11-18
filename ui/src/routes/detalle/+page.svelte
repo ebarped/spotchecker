@@ -388,13 +388,11 @@
 					<div class="flex flex-wrap items-baseline justify-between gap-2 px-4 pt-4">
 						<div>
 							<h3 class="caption">Ubicación</h3>
-							<p class="mt-1 text-[11px] text-faint">
-								{#if est.lat != null && est.lng != null}
-									Mapa centrado en {formatCoord(est.lat)}, {formatCoord(est.lng)}.
-								{:else}
+							{#if est.lat == null || est.lng == null}
+								<p class="mt-1 text-[11px] text-faint">
 									Sin coordenadas en el registro: el mapa busca por nombre y dirección.
-								{/if}
-							</p>
+								</p>
+							{/if}
 						</div>
 						<a
 							class="text-[11px] text-accent hover:underline"
