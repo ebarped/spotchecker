@@ -9,7 +9,6 @@
 		formatTime,
 		mapsEmbedURL,
 		mapsURL,
-		osmURL,
 		pct,
 		judgeRiskText,
 		riskLabel,
@@ -385,23 +384,35 @@
 					{/if}
 				</dl>
 
-				<div class="mt-5 flex flex-wrap gap-2 text-xs">
-					<a
-						class="glass glass-hover rounded-full px-3 py-1 text-muted"
-						href={mapsURL(est)}
-						target="_blank"
-						rel="noreferrer"
-					>
-						Google Maps ↗
-					</a>
-					<a
-						class="glass glass-hover rounded-full px-3 py-1 text-muted"
-						href={osmURL(est)}
-						target="_blank"
-						rel="noreferrer"
-					>
-						OpenStreetMap ↗
-					</a>
+				<div class="mt-5 overflow-hidden rounded-xl border border-line">
+					<div class="flex flex-wrap items-baseline justify-between gap-2 px-4 pt-4">
+						<div>
+							<h3 class="caption">Ubicación</h3>
+							<p class="mt-1 text-[11px] text-faint">
+								{#if est.lat != null && est.lng != null}
+									Mapa centrado en {formatCoord(est.lat)}, {formatCoord(est.lng)}.
+								{:else}
+									Sin coordenadas en el registro: el mapa busca por nombre y dirección.
+								{/if}
+							</p>
+						</div>
+						<a
+							class="text-[11px] text-accent hover:underline"
+							href={mapsURL(est)}
+							target="_blank"
+							rel="noreferrer"
+						>
+							Abrir en Google Maps ↗
+						</a>
+					</div>
+					<iframe
+						class="mt-3 h-72 w-full border-0"
+						src={mapsEmbedURL(est)}
+						title={`Mapa de ${est.name}`}
+						loading="lazy"
+						referrerpolicy="no-referrer-when-downgrade"
+						allowfullscreen
+					></iframe>
 				</div>
 			</section>
 
@@ -519,38 +530,6 @@
 				{/if}
 			</section>
 		</div>
-
-		<!-- Location: the same place the links above point to, embedded -->
-		<section class="glass mt-4 overflow-hidden rounded-2xl">
-			<div class="flex flex-wrap items-baseline justify-between gap-2 px-5 pt-5">
-				<div>
-					<h2 class="text-sm font-semibold">Ubicación</h2>
-					<p class="mt-1 text-xs text-faint">
-						{#if est.lat != null && est.lng != null}
-							Mapa centrado en {formatCoord(est.lat)}, {formatCoord(est.lng)}.
-						{:else}
-							Sin coordenadas en el registro: el mapa busca por nombre y dirección.
-						{/if}
-					</p>
-				</div>
-				<a
-					class="glass glass-hover rounded-full px-3 py-1 text-xs text-muted"
-					href={mapsURL(est)}
-					target="_blank"
-					rel="noreferrer"
-				>
-					Abrir en Google Maps ↗
-				</a>
-			</div>
-			<iframe
-				class="mt-4 h-80 w-full border-0"
-				src={mapsEmbedURL(est)}
-				title={`Mapa de ${est.name}`}
-				loading="lazy"
-				referrerpolicy="no-referrer-when-downgrade"
-				allowfullscreen
-			></iframe>
-		</section>
 
 		<!-- Evidence: only when the report carries it -->
 		{#if evidence.length > 0}
