@@ -16,7 +16,8 @@
 		TIERS,
 		TIER_COLORS,
 		TIER_LABELS,
-		riskLabel,
+		judgeRiskText,
+		riskText,
 		scanAge,
 		scoreChanges,
 		type Category,
@@ -285,7 +286,7 @@
 				<input
 					type="search"
 					bind:value={q}
-					placeholder="Buscar por nombre…"
+					placeholder="Buscar por nombre o ID…"
 					class="glass rounded-full px-4 py-1.5 text-sm outline-none placeholder:text-faint"
 				/>
 				<select bind:value={tier} class="glass rounded-full px-3 py-1.5 text-sm">
@@ -311,12 +312,12 @@
 				<table class="w-full text-sm">
 					<thead>
 						<tr class="border-b border-line text-left text-[11px] uppercase tracking-wider text-muted">
-							<th class="px-4 py-3 font-semibold">#</th>
+							<th class="px-4 py-3 font-semibold">ID</th>
 							<th class="px-4 py-3 font-semibold">Establecimiento</th>
 							<th class="px-4 py-3 font-semibold">Tier</th>
 							<th class="px-4 py-3 font-semibold">Estado</th>
-							<th class="px-4 py-3 font-semibold">Riesgo cierre</th>
-							<th class="px-4 py-3 font-semibold">Prioridad</th>
+							<th class="px-4 py-3 font-semibold">Riesgo motor</th>
+							<th class="px-4 py-3 font-semibold">Riesgo juez</th>
 							<th class="px-4 py-3 font-semibold">Motivo</th>
 							<th class="px-4 py-3 font-semibold">Scan</th>
 							<th class="px-4 py-3"></th>
@@ -325,9 +326,22 @@
 					<tbody>
 						{#each filtered as item (item.establishment.id)}
 							<tr class="border-b border-line/60 last:border-0">
-								<td class="px-4 py-3 font-mono text-muted">{item.rank}</td>
 								<td class="px-4 py-3">
-									<p class="font-medium">{item.establishment.name}</p>
+									<a
+										href={`/detalle?id=${encodeURIComponent(item.establishment.id)}`}
+										class="mono text-xs text-accent hover:underline"
+										title={`Ver la ficha de ${item.establishment.name}`}
+									>
+										{item.establishment.id}
+									</a>
+								</td>
+								<td class="px-4 py-3">
+									<a
+										href={`/detalle?id=${encodeURIComponent(item.establishment.id)}`}
+										class="font-medium hover:text-accent"
+									>
+										{item.establishment.name}
+									</a>
 									<p class="text-xs text-muted">
 										{CATEGORY_LABELS[item.establishment.category]} · {item.establishment
 											.municipality}
@@ -362,10 +376,10 @@
 									{/if}
 								</td>
 								<td class="px-4 py-3 font-mono">
-									{item.score ? riskLabel(item.score.closure_risk) : '—'}
+									{item.score ? riskText(item.score) : '—'}
 								</td>
-								<td class="px-4 py-3 font-mono">
-									{item.score ? Math.round(item.score.priority) : '—'}
+								<td class="px-4 py-3 font-mono text-muted">
+									{item.score ? judgeRiskText(item.score) : '—'}
 								</td>
 								<td class="max-w-xs px-4 py-3 text-xs text-muted">
 									{#if item.score}

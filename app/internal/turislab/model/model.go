@@ -58,6 +58,12 @@ const (
 	KindOvertureStatus SignalKind = "overture_status"
 	KindPhoneResult    SignalKind = "phone_result"
 	KindReviewText     SignalKind = "review_text"
+	// KindReviewRecency measures how long the Google listing has gone
+	// without a new review: silence is weak evidence of inactivity.
+	KindReviewRecency SignalKind = "review_recency"
+	// KindWebsiteFound carries the website Google Maps knows about, so the
+	// website collector can check a URL the registry does not have.
+	KindWebsiteFound SignalKind = "website_found"
 )
 
 // SignalFamily groups signals by the type of evidence they contribute.
@@ -73,6 +79,13 @@ const (
 )
 
 // Signal is one piece of raw evidence collected by a source adapter.
+//
+// Value always means the same thing, whatever the family: how much this
+// signal points at the business being closed or inactive, from 0 (it looks
+// alive) to 1 (it looks closed). Sources that observe "aliveness" — a
+// website that answers, an OSM element with opening hours, a recent review —
+// must emit the complement, so the scoring engine can average every family
+// on one scale without special cases.
 type Signal struct {
 	ID              string       `json:"id"`
 	EstablishmentID string       `json:"establishment_id"`
@@ -147,6 +160,12 @@ type Score struct {
 	Volatile         bool            `json:"volatile"`
 	ConflictDetected bool            `json:"conflict_detected"`
 
+	// RiskKnown is false when no signal said anything about the business
+	// being open or closed. ClosureRisk is then meaningless (it is zero
+	// only because nothing was measured) and consumers must render it as
+	// unknown instead of "0%".
+	RiskKnown bool `json:"risk_known"`
+
 	// HeuristicStatus/Reason keep what the deterministic engine decided,
 	// so the judge's verdict can be compared against it. Status and Reason
 	// hold the FINAL verdict: the judge's when it ran, the engine's
@@ -160,6 +179,14 @@ type Score struct {
 	JudgeStatus     StatusSuggested `json:"judge_status,omitempty"`
 	JudgeReason     string          `json:"judge_reason,omitempty"`
 	JudgeConfidence float64         `json:"judge_confidence,omitempty"`
+	// JudgeRisk is the closure risk the LLM judge reasoned over the same
+	// evidence, 0-1. It is a second opinion beside ClosureRisk: the engine
+	// stays the deterministic anchor and the judge can disagree with it.
+	JudgeRisk float64 `json:"judge_risk"`
+	// JudgeRiskKnown is false when the judge did not report a risk (it did
+	// not run, or the score predates this field). JudgeRisk is then
+	// meaningless and consumers must render it as unknown, not "0%".
+	JudgeRiskKnown bool `json:"judge_risk_known"`
 	// JudgeError records why the judge failed for this score: the final
 	// verdict is then the engine's.
 	JudgeError string `json:"judge_error,omitempty"`

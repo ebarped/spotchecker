@@ -98,6 +98,8 @@ func (g *GMapsScraper) Capabilities() []model.SignalKind {
 		model.KindBusinessStatus,
 		model.KindRating,
 		model.KindReviewCount,
+		model.KindReviewRecency,
+		model.KindWebsiteFound,
 	}
 }
 
@@ -129,6 +131,22 @@ type gosomPlace struct {
 	Latitude    float64 `json:"latitude"`
 	Longitude   float64 `json:"longitude"`
 	Address     string  `json:"address"`
+
+	// WebSite is the URL Google Maps lists for the business. It fills the
+	// gap left by registries such as REAT, which carry no website column,
+	// and is handed to the website collector as a KindWebsiteFound fact.
+	WebSite string `json:"web_site"`
+
+	// UserReviews carries the dated reviews the recency signal is built
+	// from. gosom returns a handful per place, newest first.
+	UserReviews []gosomReview `json:"user_reviews"`
+}
+
+// gosomReview is the subset of one gosom review turislab needs. The date
+// lives in published_at; "When" is a localised human string ("Hace 6
+// meses") and must not be parsed.
+type gosomReview struct {
+	PublishedAt string `json:"published_at"`
 }
 
 // placeStatus is the closed-state classification turislab needs.
@@ -299,8 +317,100 @@ func (g *GMapsScraper) Collect(ctx context.Context, est *model.Establishment) ([
 		signals = append(signals, cs)
 	}
 
+	// ── Website fact ─────────────────────────────────────────────────────────
+	// Not evidence, just the URL: the scanner hands it to the website
+	// collector, which the registry alone would leave with nothing to check.
+	if place.WebSite != "" {
+		ws := NewSignal(est.ID, g.Name(), model.KindWebsiteFound, model.FamilyContext)
+		ws.RawValue = place.WebSite
+		ws.Value = 0.0
+		ws.Confidence = 0.90
+		ws.Weight = 0.0
+		ws.TTLDays = g.cfg.CacheTTLDays
+		ws.DedupeKey = DedupeKey(est.ID, g.Name(), string(model.KindWebsiteFound), place.WebSite)
+		signals = append(signals, ws)
+	}
+
+	// ── Review recency ───────────────────────────────────────────────────────
+	if sig := reviewRecencySignal(est.ID, g.Name(), place, now, g.cfg.CacheTTLDays); sig != nil {
+		signals = append(signals, sig)
+	}
+
 	g.recordRun(now, "", len(signals), true)
 	return signals, nil
+}
+
+// reviewRecencySignal turns "how long since the last Google review" into an
+// activity signal. Silence is weak evidence of inactivity: a place reviewed
+// every month is alive, one that has not been reviewed in two years looks
+// dormant — but on its own it is not proof of closure.
+func reviewRecencySignal(estID, source string, place gosomPlace, now time.Time, ttlDays int) *model.Signal {
+	var last time.Time
+	for _, r := range place.UserReviews {
+		t, err := time.Parse(time.RFC3339, r.PublishedAt)
+		if err != nil || t.IsZero() {
+			continue
+		}
+		if t.After(last) {
+			last = t
+		}
+	}
+
+	if last.IsZero() {
+		// Reviews exist but none carries a usable date: the recency is
+		// unknown, so it is a weak and uncertain hint, not a strong one.
+		if len(place.UserReviews) == 0 {
+			return nil
+		}
+		sig := NewSignal(estID, source, model.KindReviewRecency, model.FamilyActivity)
+		sig.RawValue = "sin fecha de última reseña"
+		sig.Value = 0.5
+		sig.Confidence = 0.4
+		sig.Weight = 0.5
+		sig.TTLDays = ttlDays
+		sig.DedupeKey = DedupeKey(estID, source, string(model.KindReviewRecency), "undated")
+		return sig
+	}
+
+	days := now.Sub(last).Hours() / 24.0
+	if days < 0 {
+		days = 0
+	}
+	value, bucket := reviewRecencyRisk(days)
+
+	sig := NewSignal(estID, source, model.KindReviewRecency, model.FamilyActivity)
+	sig.RawValue = fmt.Sprintf("%s (hace %d días)", last.UTC().Format("2006-01-02"), int(days))
+	sig.Value = value
+	sig.Confidence = 0.6
+	sig.Weight = 0.5
+	sig.TTLDays = ttlDays
+	// The key carries the review date and the bucket, so a new review (or a
+	// bucket crossing) creates a new observation while repeated scans of the
+	// same state do not pile up.
+	dedupe := fmt.Sprintf("%s|%s", last.UTC().Format("2006-01-02"), bucket)
+	sig.DedupeKey = DedupeKey(estID, source, string(model.KindReviewRecency), dedupe)
+	return sig
+}
+
+// reviewRecencyRisk maps the age of the newest review to the shared risk
+// scale (0 = looks alive, 1 = looks closed). Six months of silence is the
+// point where a listing stops looking merely quiet: a working business in
+// the tourist sector gets reviews far more often than that.
+func reviewRecencyRisk(days float64) (value float64, bucket string) {
+	switch {
+	case days <= 45:
+		return 0.0, "0-45d"
+	case days <= 120:
+		return 0.15, "45-120d"
+	case days <= 240:
+		return 0.40, "120-240d"
+	case days <= 400:
+		return 0.60, "240-400d"
+	case days <= 730:
+		return 0.75, "400-730d"
+	default:
+		return 0.90, ">730d"
+	}
 }
 
 // runScraper executes the configured binary and returns parsed places.
@@ -346,6 +456,11 @@ func (g *GMapsScraper) runScraper(ctx context.Context, est *model.Establishment,
 		}
 		if est != nil && est.Lat != nil && est.Lng != nil {
 			args = append(args, "-geo", fmt.Sprintf("%.6f,%.6f", *est.Lat, *est.Lng))
+		}
+		// gosom always returns the newest reviews; -extra-reviews asks for the
+		// extended set, which costs extra page loads.
+		if g.cfg.IncludeReviews {
+			args = append(args, "-extra-reviews")
 		}
 		if !g.cfg.Headless {
 			args = append(args, "-debug")

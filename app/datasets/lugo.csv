@@ -1,3 +1,7 @@
 id,name,category,stars,address,municipality,province,postal_code,country,lat,lng,phone,email,website,registry_id,certifications,last_inspection_at,last_inspection_result,google_place_id,tripadvisor_id,yelp_id,osm_id,notes,id_generated
-rest-canedo,Canedo Brasería,restaurant,,"Estrada Vella de Santiago, 23",Lugo,Lugo,27004,ES,43.001,-7.5655,+34679484811,,,LUG-R-10006,,2024-07-12T00:00:00Z,Correcto,,,,,Restaurante especializado en carnes y pescados a la brasa. Datos administrativos simulados.,false
-rest-laoca,Restaurante La Oca,restaurant,,"Avenida Ramón Ferreiro, 21",Lugo,Lugo,27003,ES,43.0050196,-7.553452,+34982224412,,,LUG-R-10008,,2024-10-03T00:00:00Z,Correcto,,,,,Referencia gastronómica de Lugo durante 38 años. Cerró definitivamente en noviembre de 2025; la ficha de Google Maps está como cerrada permanentemente. Registro e inspección simulados.,false
+R-LU-000710,LA OCA,restaurant,,"AVDA. RAMÓN FERREIRO, 21",Lugo,Lugo,27002,ES,43.005030,-7.554310,,,,R-LU-000710,,,,,,,,,false
+C-LU-000267,GRAN CAFE,bar,,RAMON FERREIRO nº 21,Lugo,Lugo,27002,ES,43.005030,-7.554310,,,,C-LU-000267,,,,,,,,,false
+R-LU-001390,PAPRICA,restaurant,,Rúa Noreas nº 10,Lugo,Lugo,27001,ES,,,,,,R-LU-001390,,,,,,,,,false
+H-LU-000469,EUROSTARS GRAN HOTEL DE LUGO,hotel,4,AVENIDA RAMÓN FERREIRO Nº 21,Lugo,Lugo,27002,ES,43.005030,-7.554310,982224152,,,H-LU-000469,,,,,,,,,false
+H-LU-000475,LA MESA DEL COCINERO,hotel,2,"PLAZA DE LA LIBERTAD, Nº 10",Lugo,Lugo,,ES,43.004110,-7.551370,982180017,,,H-LU-000475,,,,,,,,,false
+A-LU-000018,APARTAMENTOS CATASOL,other,,CALLE CATASOL Nº 13,Lugo,Lugo,27002,ES,43.007360,-7.551060,666553789,,,A-LU-000018,,,,,,,,,false

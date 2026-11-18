@@ -200,7 +200,7 @@ func main() {
 		opts = append(opts, server.WithAgent(agentSvc))
 	}
 	srv := server.New(uiFS, log, opts...)
-	go refreshLoop(ctx, db, srcs, scanner, srv, agentSvc, log)
+	go refreshLoop(ctx, db, srcs, scanner, srv, agentSvc, cfg.Scan.StaleAfterDays, log)
 
 	lnAddr := cfg.Server.Addr
 	if *addr != "" {
@@ -395,12 +395,12 @@ func agentConfig(cfg config.AgentConfig) agent.Config {
 	}
 }
 
-func refreshLoop(ctx context.Context, db *store.SQLiteStore, srcs []source.SignalSource, scanner *scan.Scanner, srv *server.Server, agentSvc *agent.Service, log *logx.Logger) {
+func refreshLoop(ctx context.Context, db *store.SQLiteStore, srcs []source.SignalSource, scanner *scan.Scanner, srv *server.Server, agentSvc *agent.Service, staleAfterDays int, log *logx.Logger) {
 	ticker := time.NewTicker(10 * time.Second)
 	defer ticker.Stop()
 
 	build := func() {
-		rep := buildReport(ctx, db, srcs, scanner)
+		rep := buildReport(ctx, db, srcs, scanner, staleAfterDays)
 		srv.SetReport(rep)
 		// The assistant answers from the same snapshot the UI shows.
 		if agentSvc != nil {
@@ -459,7 +459,7 @@ func waitingOrder(ests []*model.Establishment, byID map[string]*model.Score, cur
 	return waiting
 }
 
-func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.SignalSource, scanner *scan.Scanner) *model.Report {
+func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.SignalSource, scanner *scan.Scanner, staleAfterDays int) *model.Report {
 	ests, err := db.ListEstablishments(ctx)
 	if err != nil {
 		ests = nil
@@ -468,6 +468,19 @@ func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.Signa
 	if err != nil {
 		scores = nil
 	}
+
+	// The evidence table needs the signals behind each score. One query for
+	// the whole report beats one per establishment, and the window is the
+	// same the scanner scores with.
+	if staleAfterDays <= 0 {
+		staleAfterDays = 7
+	}
+	since := time.Now().AddDate(0, 0, -staleAfterDays)
+	signals, err := db.ListSignalsSince(ctx, since)
+	if err != nil {
+		signals = nil
+	}
+	evidenceByID := reportEvidence(signals, since, scoring.DefaultScoringConfig().DecayHalfLifeDays)
 
 	byID := make(map[string]*model.Score, len(scores))
 	for _, sc := range scores {
@@ -503,10 +516,11 @@ func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.Signa
 	for _, p := range scored {
 		rank++
 		item := model.QueueItem{
-			Rank:          rank,
-			Establishment: p.est,
-			Score:         p.sc,
-			ScanAge:       now.Sub(p.sc.ComputedAt),
+			Rank:           rank,
+			Establishment:  p.est,
+			Score:          p.sc,
+			PrimarySignals: evidenceByID[p.est.ID],
+			ScanAge:        now.Sub(p.sc.ComputedAt),
 		}
 		switch p.sc.Tier {
 		case model.TierP0:

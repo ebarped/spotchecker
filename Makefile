@@ -8,7 +8,7 @@ TL_SCRAPER_VERSION ?= v1.18.1
 TL_SCRAPER_BIN ?= bin/google-maps-scraper
 
 .DEFAULT_GOAL := help
-.PHONY: help all build test vet fmt lint run scan-once validate serve tidy clean \
+.PHONY: help all build test vet fmt lint run scan-once validate serve tidy clean datasets \
 	ui-install ui-dev ui-check ui-build ui-build-if-needed turislab-scraper
 
 help: ## Show the available targets
@@ -46,6 +46,13 @@ scan-once: build ## Scan every establishment once and exit
 
 validate: build ## Compare scores with input.ground_truth_path (set it in the config)
 	./$(BIN) --config $(CONFIG) --validate
+
+# Regenerate app/datasets/lugo.csv from the official REAT directories.
+# Defaults: Lugo municipality, 500 m around La Oca, restaurants on the
+# surrounding streets. Override with REAT_FLAGS="-concello Vigo -max-alox 20".
+REAT_FLAGS ?= -out datasets/lugo.csv
+datasets: ## Rebuild app/datasets/*.csv from the REAT directories
+	$(GO) -C $(APP) run ./cmd/reat2csv $(REAT_FLAGS)
 
 # The gosom scraper is an MIT-licensed standalone binary (no API key). The
 # release is ~70 MB, so it is gitignored and fetched on demand. Its first run

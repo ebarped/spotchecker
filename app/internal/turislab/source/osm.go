@@ -176,16 +176,17 @@ func (o *OSMSource) Collect(ctx context.Context, est *model.Establishment) ([]*m
 		if _, hasHours := tags["opening_hours"]; hasHours {
 			elemName := strings.ToLower(tags["name"])
 			if elemName != "" && strings.Contains(elemName, estNameLower) {
-				signals = append(signals, o.tagSignal(est, "found_active", 1.0, 0.55, 0.30, model.FamilyActivity))
+				signals = append(signals, o.tagSignal(est, "found_active", 0.0, 0.55, 0.30, model.FamilyActivity))
 			}
 		}
 	}
 
-	// No elements found at all — emit a weak negative signal.
+	// No elements found at all — emit a weak negative signal. Absence from
+	// OSM is normal for small businesses, so it is far from a closure.
 	if len(ovResp.Elements) == 0 {
 		sig := NewSignal(est.ID, o.Name(), model.KindOSMTag, model.FamilyActivity)
 		sig.RawValue = "not_found"
-		sig.Value = 0.0
+		sig.Value = 0.35
 		sig.Confidence = 0.40
 		sig.Weight = 0.20
 		sig.TTLDays = o.cfg.CacheTTLDays

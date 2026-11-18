@@ -4,7 +4,8 @@
 // a suggested status. The judge sits one step after it: it hands the whole
 // evidence dossier of one establishment — registry data, every collected
 // signal with its source and age, and the engine's own verdict — to an LLM,
-// which issues the final status with a rationale and its confidence.
+// which issues the final status with a rationale, its confidence and its own
+// closure risk over the same evidence.
 //
 // The judge is strictly optional: when it is disabled, or when its call
 // fails, the engine's verdict stays the final one. It decides the *what*
@@ -49,18 +50,30 @@ const judgeInstruction = `Eres el juez de Turislab Doctor. Decides el estado ope
 
 Recibes un expediente en JSON: los datos de registro del establecimiento, las señales recogidas por las fuentes públicas (web, OSM, Google Maps…) con su fuente, antigüedad y confianza, y el veredicto heurístico del motor determinista.
 
+Cómo leer las señales:
+- "value" va siempre en la misma escala: 0 = parece vivo/operativo, 1 = parece cerrado/inactivo.
+- "age_days" es la antigüedad de la observación, no la fecha del hecho.
+- "family=direct_status": estado que una fuente declara (p. ej. Google Maps marca cierre permanente). Es la evidencia más fuerte.
+- "family=activity": señales indirectas de que el negocio sigue o no activo. Incluye "review_recency" (días desde la última reseña de Google, con la fecha en "raw_value"), "web_status" (la web oficial responde, da 404 o no carga) y "osm_tag". Una web oficial que no carga y una última reseña antigua SON evidencia de inactividad, no ausencia de datos: pesan menos que un cierre declarado, pero cuentan.
+- "family=reviews" (nota media, número de reseñas) describe calidad, no si el negocio sigue abierto: no la uses para deducir un cierre.
+- "website_found" solo aporta la URL que conoce Google: es un dato, no evidencia.
+- "engine.risk_known=false" significa que el motor no midió el riesgo de cierre (no es que sea 0): no lo interpretes como "está abierto".
+
 Reglas:
 1. Juzga solo con la evidencia del expediente. No inventes hechos ni consultes nada externo.
 2. Pesa cada señal por su tipo, fuente y frescura: un cierre permanente confirmado por Google Maps pesa más que una web caída o una señal de hace semanas.
 3. El veredicto heurístico del motor es una referencia, no una orden: confírmalo o corrígelo razonando sobre la evidencia.
 4. No confirmes un cierre ("closure_confirmed") con evidencia débil o contradictoria: usa "closure_suspected" o "unknown" y baja la confianza.
 5. Un local "cerrado ahora" por horario no es un cierre permanente: distingue "closed_temporarily" y "seasonal" solo cuando la evidencia lo diga.
-6. Con poca o nula evidencia, responde "unknown" con confianza baja en vez de adivinar.
+6. Con poca o nula evidencia, responde "unknown" con confianza baja en vez de adivinar. Pero si hay señales de actividad (web viva, reseñas recientes), no respondas "unknown": úsalas.
+7. Si la web responde y hay reseñas recientes, el negocio probablemente sigue activo aunque falte el estado de Google.
+8. El riesgo es tuyo: pondera todas las señales del expediente y da un número coherente con tu veredicto. No copies sin más el riesgo del motor: si tu veredicto lo corrige, el número debe reflejarlo.
 
 Responde SOLO con un objeto JSON válido, sin markdown ni texto alrededor, con esta forma exacta:
-{"verdict":"active|closure_suspected|closure_confirmed|closed_temporarily|seasonal|unknown","confidence":0.0,"rationale":"una o dos frases en español citando las señales que motivan la decisión"}
+{"verdict":"active|closure_suspected|closure_confirmed|closed_temporarily|seasonal|unknown","confidence":0.0,"risk":0.0,"rationale":"una o dos frases en español citando las señales que motivan la decisión"}
 - confidence: 0.0-1.0, tu certeza sobre el veredicto.
-- rationale: en español, menciona fuentes concretas (p. ej. "Google Maps lo marca como cerrado permanentemente desde hace días").`
+- risk: 0.0-1.0, tu riesgo de cierre: 0 = sin riesgo, el negocio está claramente operativo; 1 = cierre seguro. Debe ser coherente con el veredicto (un "active" con evidencia viva va cerca de 0; un "closure_confirmed" va cerca de 1) y con la evidencia: una web caída o una última reseña de hace años suben el número aunque no haya estado directo.
+- rationale: en español, menciona fuentes concretas (p. ej. "Google Maps lo marca como cerrado permanentemente desde hace días" o "la última reseña es de hace más de un año y la web no responde").`
 
 // Config carries the judge settings, decoupled from any config package.
 type Config struct {
@@ -82,6 +95,14 @@ type Verdict struct {
 	// separately: the score's evidence confidence (and with it the tier)
 	// stays what the engine computed.
 	Confidence float64
+	// Risk is the judge's own closure risk, 0-1, reasoned over every signal
+	// in the dossier. It sits beside the engine's ClosureRisk: the engine
+	// is the deterministic anchor, the judge is the second opinion.
+	Risk float64
+	// riskProvided records whether the model actually answered a risk.
+	// When it did not, Review falls back to the engine's (or the status
+	// implied by the verdict) so the UI never shows a fake 0%.
+	riskProvided bool
 	// Rationale explains the verdict in Spanish, citing the evidence.
 	Rationale string
 	// Model names the LLM that judged.
@@ -141,12 +162,21 @@ type dossier struct {
 	// FailedSignals counts signals dropped for carrying an error: the
 	// model should know the sources tried and failed, without the noise.
 	FailedSignals int `json:"failed_signals"`
-	Engine        struct {
-		ClosureRisk   float64                  `json:"closure_risk"`
-		Status        model.StatusSuggested    `json:"status"`
-		Reason        string                   `json:"reason"`
-		EvidenceCount int                      `json:"evidence_count"`
-		Conflict      bool                     `json:"conflict"`
+	// Facts are the few human-readable conclusions the model should not have
+	// to rebuild from signal values: when the newest review was, and whether
+	// the official website answered.
+	Facts struct {
+		Website       string `json:"website,omitempty"`
+		WebsiteStatus string `json:"website_status,omitempty"`
+		LastReview    string `json:"last_review,omitempty"`
+	} `json:"facts"`
+	Engine struct {
+		ClosureRisk   *float64              `json:"closure_risk,omitempty"`
+		RiskKnown     bool                  `json:"risk_known"`
+		Status        model.StatusSuggested `json:"status"`
+		Reason        string                `json:"reason"`
+		EvidenceCount int                   `json:"evidence_count"`
+		Conflict      bool                  `json:"conflict"`
 	} `json:"engine"`
 }
 
@@ -168,6 +198,7 @@ func buildDossier(est *model.Establishment, signals []*model.Signal, score *mode
 	d.Establishment.Category = string(est.Category)
 	d.Establishment.Municipality = est.Municipality
 	d.Establishment.Website = est.Website
+	d.Facts.Website = est.Website
 
 	now := time.Now()
 	for _, sig := range signals {
@@ -180,6 +211,18 @@ func buildDossier(est *model.Establishment, signals []*model.Signal, score *mode
 		}
 		if len(d.Signals) >= maxSignals {
 			continue // the store returns newest first: drop the oldest tail
+		}
+		switch sig.Kind {
+		case model.KindReviewRecency:
+			// Raw value is "YYYY-MM-DD (hace N días)": exactly the fact the
+			// model needs, so it is surfaced on its own too.
+			d.Facts.LastReview = sig.RawValue
+		case model.KindWebsiteFound:
+			if d.Facts.Website == "" {
+				d.Facts.Website = sig.RawValue
+			}
+		case model.KindWebStatus:
+			d.Facts.WebsiteStatus = sig.RawValue
 		}
 		age := now.Sub(sig.CollectedAt).Hours() / 24.0
 		if age < 0 {
@@ -197,7 +240,11 @@ func buildDossier(est *model.Establishment, signals []*model.Signal, score *mode
 	}
 
 	if score != nil {
-		d.Engine.ClosureRisk = score.ClosureRisk
+		d.Engine.RiskKnown = score.RiskKnown
+		if score.RiskKnown {
+			risk := score.ClosureRisk
+			d.Engine.ClosureRisk = &risk
+		}
 		d.Engine.Status = score.Status
 		d.Engine.Reason = score.Reason
 		d.Engine.EvidenceCount = score.EvidenceCount
@@ -257,14 +304,18 @@ func (j *Judge) Review(ctx context.Context, est *model.Establishment, signals []
 		j.log.Warn("judge", "[%s] respuesta no válida del modelo: %v", est.ID, err)
 		return nil, err
 	}
+	if !verdict.riskProvided {
+		verdict.Risk = fallbackRisk(verdict.Status, score)
+	}
 	name := j.cfg.ModelName
 	if name == "" && llm != nil {
 		name = llm.Name()
 	}
 	verdict.Model = name
 
-	j.log.Info("judge", "[%s] veredicto %s (confianza %.2f) en %s — %s",
-		est.ID, verdict.Status, verdict.Confidence, time.Since(started).Round(time.Millisecond), verdict.Rationale)
+	j.log.Info("judge", "[%s] veredicto %s (confianza %.2f, riesgo %.0f%%) en %s — %s",
+		est.ID, verdict.Status, verdict.Confidence, verdict.Risk*100,
+		time.Since(started).Round(time.Millisecond), verdict.Rationale)
 	return verdict, nil
 }
 
@@ -272,9 +323,10 @@ func (j *Judge) Review(ctx context.Context, est *model.Establishment, signals []
 
 // rawVerdict mirrors the JSON shape the model must answer.
 type rawVerdict struct {
-	Verdict    string  `json:"verdict"`
-	Confidence float64 `json:"confidence"`
-	Rationale  string  `json:"rationale"`
+	Verdict    string   `json:"verdict"`
+	Confidence float64  `json:"confidence"`
+	Risk       *float64 `json:"risk"`
+	Rationale  string   `json:"rationale"`
 }
 
 // parseVerdict extracts the verdict JSON from a model answer. Models wrap
@@ -329,11 +381,49 @@ func parseVerdict(text string) (*Verdict, error) {
 		rationale = string([]rune(rationale)[:maxRationaleRunes]) + "…"
 	}
 
-	return &Verdict{
+	verdict := &Verdict{
 		Status:     status,
 		Confidence: confidence,
 		Rationale:  rationale,
-	}, nil
+	}
+	if raw.Risk != nil && !math.IsNaN(*raw.Risk) {
+		verdict.Risk = clamp01(*raw.Risk)
+		verdict.riskProvided = true
+	}
+	return verdict, nil
+}
+
+// clamp01 keeps a value inside the shared 0-1 risk scale.
+func clamp01(v float64) float64 {
+	if v < 0 {
+		return 0
+	}
+	if v > 1 {
+		return 1
+	}
+	return v
+}
+
+// fallbackRisk is the judge risk used when the model omitted the field:
+// the engine's risk when it was measured, otherwise the risk the verdict
+// itself implies. It exists so an older or terse model answer still yields
+// a number coherent with the status instead of a hardcoded 0%.
+func fallbackRisk(status model.StatusSuggested, score *model.Score) float64 {
+	if score != nil && score.RiskKnown {
+		return clamp01(score.ClosureRisk)
+	}
+	switch status {
+	case model.StatusClosureConfirmed:
+		return 0.90
+	case model.StatusClosureSuspected:
+		return 0.65
+	case model.StatusTemporary, model.StatusSeasonal:
+		return 0.50
+	case model.StatusActive:
+		return 0.05
+	default:
+		return 0.50
+	}
 }
 
 func ptr[T any](v T) *T { return &v }

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
 	filterQueue,
+	findQueueItem,
+	formatCoord,
+	formatDate,
+	mapsURL,
+	osmURL,
 	pct,
 	pocCriterionMet,
 	riskLabel,
@@ -17,6 +22,9 @@ import {
 	coveredCount,
 	formatTime,
 	riskBuckets,
+	judgeRiskText,
+	riskText,
+	type Establishment,
 	type QueueItem,
 	type Score,
 	type TurislabReport
@@ -37,6 +45,7 @@ function score(overrides: Partial<Score> = {}): Score {
 		reason: 'Sin indicios',
 		volatile: false,
 		conflict_detected: false,
+		risk_known: true,
 		heuristic_status: 'active',
 		heuristic_reason: 'Sin indicios',
 		...overrides
@@ -97,6 +106,13 @@ describe('filterQueue', () => {
 		expect(filterQueue(queue, { q: 'EL' }).length).toBe(2);
 	});
 
+	it('filters by free text on the id too', () => {
+		expect(filterQueue(queue, { q: 'hotel-002' }).map((i) => i.establishment.id)).toEqual([
+			'hotel-002'
+		]);
+		expect(filterQueue(queue, { q: 'REST-' }).length).toBe(2);
+	});
+
 	it('combines filters', () => {
 		const out = filterQueue(queue, { tier: 'P0', q: 'pinar' });
 		expect(out).toHaveLength(0);
@@ -121,6 +137,56 @@ describe('filterQueue', () => {
 		const out = filterQueue(waiting, { tier: 'por_procesar' });
 		expect(out).toHaveLength(1);
 		expect(out[0].establishment.id).toBe('rest-001');
+	});
+});
+
+describe('establishment detail helpers', () => {
+	const oca: Establishment = {
+		...item(1, 'R-LU-000710', 'LA OCA').establishment,
+		registry_id: 'R-LU-000710',
+		address: 'AVDA. RAMÓN FERREIRO, 21',
+		lat: 43.00503,
+		lng: -7.55431
+	};
+
+	it('finds the queue entry by id', () => {
+		expect(findQueueItem(queue, 'hotel-002')?.establishment.name).toBe('Hostal El Pinar');
+		expect(findQueueItem(queue, 'no-existe')).toBeUndefined();
+	});
+
+	it('formats coordinates with the registry precision', () => {
+		expect(formatCoord(43.00503)).toBe('43.005030');
+		expect(formatCoord(-7.55431)).toBe('-7.554310');
+	});
+
+	it('links to Google Maps by coordinates when they exist', () => {
+		expect(mapsURL(oca)).toBe(
+			'https://www.google.com/maps/search/?api=1&query=43.005030%2C-7.554310'
+		);
+	});
+
+	it('falls back to the address when there are no coordinates', () => {
+		const noCoords: Establishment = { ...oca, lat: null, lng: null };
+		const url = mapsURL(noCoords);
+		expect(url).toContain('LA%20OCA');
+		expect(url).toContain('AVDA.%20RAM%C3%93N%20FERREIRO%2C%2021');
+	});
+
+	it('links to OSM centred on the coordinates', () => {
+		expect(osmURL(oca)).toBe(
+			'https://www.openstreetmap.org/?mlat=43.005030&mlon=-7.554310#map=18/43.005030/-7.554310'
+		);
+	});
+
+	it('searches OSM by name and address without coordinates', () => {
+		expect(osmURL({ ...oca, lat: null, lng: null })).toContain(
+			'https://www.openstreetmap.org/search?query=LA%20OCA'
+		);
+	});
+
+	it('formats an inspection date without the clock', () => {
+		expect(formatDate('2024-05-14T00:00:00Z')).toMatch(/2024/);
+		expect(formatDate('not-a-date')).toBe('not-a-date');
 	});
 });
 
@@ -349,6 +415,45 @@ describe('riskBuckets', () => {
 			item(2, 'b', 'B', { closure_risk: 1.7 })
 		];
 		expect(riskBuckets(mixed).map((b) => b.count)).toEqual([1, 0, 0, 0, 1]);
+	});
+
+	it('leaves unmeasured risks out instead of piling them into 0–20%', () => {
+		const mixed = [
+			item(1, 'a', 'A', { closure_risk: 0.5, risk_known: true }),
+			item(2, 'b', 'B', { closure_risk: 0, risk_known: false })
+		];
+		expect(riskBuckets(mixed).map((b) => b.count)).toEqual([0, 0, 1, 0, 0]);
+	});
+});
+
+describe('riskText', () => {
+	it('renders a measured risk as a percentage', () => {
+		expect(riskText(score({ closure_risk: 0.3, risk_known: true }))).toBe('30%');
+	});
+
+	it('renders an unmeasured risk as an em dash, never as 0%', () => {
+		expect(riskText(score({ closure_risk: 0, risk_known: false }))).toBe('—');
+	});
+
+	it('clamps values outside [0, 1] so the UI never shows 170%', () => {
+		expect(riskLabel(1.7)).toBe('100%');
+		expect(riskLabel(-0.5)).toBe('0%');
+	});
+});
+
+describe('judgeRiskText', () => {
+	it('renders the judge risk beside the engine risk', () => {
+		expect(
+			judgeRiskText(score({ judge_status: 'closure_suspected', judge_risk: 0.64, judge_risk_known: true }))
+		).toBe('64%');
+	});
+
+	it('renders an em dash when the judge did not run', () => {
+		expect(judgeRiskText(score({ judge_risk: 0 }))).toBe('—');
+	});
+
+	it('renders an em dash when a legacy judge verdict carries no risk', () => {
+		expect(judgeRiskText(score({ judge_status: 'active', judge_risk: 0 }))).toBe('—');
 	});
 });
 

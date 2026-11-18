@@ -234,3 +234,67 @@ func TestParseVerdictDefaultsRationale(t *testing.T) {
 		t.Error("empty rationale must default to a placeholder")
 	}
 }
+
+func TestReviewParsesJudgeRisk(t *testing.T) {
+	llm := &fakeLLM{name: "m", text: `{"verdict":"closure_suspected","confidence":0.6,"risk":0.72,"rationale":"la web no responde y la última reseña es de hace dos años"}`}
+	j := newJudge(llm)
+
+	verdict, err := j.Review(context.Background(), testEstablishment(), testSignals(), nil)
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if verdict.Risk != 0.72 {
+		t.Errorf("risk = %v, want 0.72", verdict.Risk)
+	}
+}
+
+func TestReviewClampsJudgeRisk(t *testing.T) {
+	cases := []struct {
+		raw  string
+		want float64
+	}{
+		{`1.7`, 1},
+		{`-0.4`, 0},
+		{`0`, 0},
+	}
+	for _, tc := range cases {
+		llm := &fakeLLM{name: "m", text: `{"verdict":"active","confidence":0.5,"risk":` + tc.raw + `,"rationale":"ok"}`}
+		verdict, err := newJudge(llm).Review(context.Background(), testEstablishment(), testSignals(), nil)
+		if err != nil {
+			t.Fatalf("Review(%s): %v", tc.raw, err)
+		}
+		if verdict.Risk != tc.want {
+			t.Errorf("risk(%s) = %v, want %v", tc.raw, verdict.Risk, tc.want)
+		}
+	}
+}
+
+func TestReviewDefaultsMissingRiskToEngine(t *testing.T) {
+	// A model that omits "risk" must not make the judge look like it
+	// measured a 0% risk: the engine's measured risk stands in.
+	llm := &fakeLLM{name: "m", text: `{"verdict":"unknown","confidence":0.3,"rationale":"poca evidencia"}`}
+	score := model.NewScore("rest-001")
+	score.ClosureRisk = 0.7
+	score.RiskKnown = true
+
+	verdict, err := newJudge(llm).Review(context.Background(), testEstablishment(), testSignals(), score)
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if verdict.Risk != 0.7 {
+		t.Errorf("risk = %v, want the engine risk 0.7", verdict.Risk)
+	}
+}
+
+func TestReviewDefaultsMissingRiskFromVerdict(t *testing.T) {
+	// With no engine risk either, the fallback follows the verdict so the
+	// number is coherent with the label.
+	llm := &fakeLLM{name: "m", text: `{"verdict":"closure_confirmed","confidence":0.9,"rationale":"cerrado"}`}
+	verdict, err := newJudge(llm).Review(context.Background(), testEstablishment(), testSignals(), nil)
+	if err != nil {
+		t.Fatalf("Review: %v", err)
+	}
+	if verdict.Risk < 0.85 {
+		t.Errorf("risk = %v, want a high fallback risk for closure_confirmed", verdict.Risk)
+	}
+}

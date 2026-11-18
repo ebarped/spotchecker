@@ -73,6 +73,9 @@ func TestReportNotReadyUntilSet(t *testing.T) {
 	if rec := get(t, srv, "/api/summary"); rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("/api/summary status = %d, want 503 before the first report", rec.Code)
 	}
+	if rec := get(t, srv, "/api/establishments/rest-002"); rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("/api/establishments/{id} status = %d, want 503 before the first report", rec.Code)
+	}
 }
 
 func TestReportAndQueueAfterSet(t *testing.T) {
@@ -151,11 +154,102 @@ func TestQueueFilters(t *testing.T) {
 		t.Errorf("text filter returned %+v, want only rest-002", items)
 	}
 
+	// Text search on the id: the queue shows it, so it must be searchable.
+	rec = get(t, srv, "/api/queue?q=HOTEL-002")
+	items = decodeJSON[[]model.QueueItem](t, rec.Body.Bytes())
+	if len(items) != 1 || items[0].Establishment.ID != "hotel-002" {
+		t.Errorf("id filter returned %+v, want only hotel-002", items)
+	}
+
 	// Pagination.
 	rec = get(t, srv, "/api/queue?limit=1&offset=1")
 	items = decodeJSON[[]model.QueueItem](t, rec.Body.Bytes())
 	if len(items) != 1 || items[0].Establishment.ID != "hotel-002" {
 		t.Errorf("pagination returned %+v, want the second item", items)
+	}
+}
+
+func TestEstablishmentDetail(t *testing.T) {
+	srv := newTestServer(t)
+
+	score := model.NewScore("R-LU-000710")
+	score.Priority = 92
+	score.Confidence = 0.8
+	score.Status = model.StatusClosureConfirmed
+	score.AssignTier(model.DefaultTierConfig())
+
+	srv.SetReport(&model.Report{
+		Queue: []model.QueueItem{
+			{
+				Rank: 1,
+				Establishment: &model.Establishment{
+					ID:           "R-LU-000710",
+					Name:         "LA OCA",
+					Category:     model.CategoryRestaurant,
+					Address:      "AVDA. RAMÓN FERREIRO, 21",
+					Municipality: "Lugo",
+					RegistryID:   "R-LU-000710",
+				},
+				Score: score,
+				PrimarySignals: []model.Evidence{{
+					EstablishmentID: "R-LU-000710",
+					Source:          "google_maps_scraper",
+					Kind:            model.KindBusinessStatus,
+					Label:           "Cerrado permanentemente",
+				}},
+			},
+			{
+				Rank:          2,
+				Establishment: &model.Establishment{ID: "H-LU-000469", Name: "EUROSTARS"},
+			},
+		},
+	})
+
+	rec := get(t, srv, "/api/establishments/R-LU-000710")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
+	}
+	item := decodeJSON[model.QueueItem](t, rec.Body.Bytes())
+	if item.Establishment == nil || item.Establishment.ID != "R-LU-000710" {
+		t.Fatalf("establishment = %+v, want R-LU-000710", item.Establishment)
+	}
+	if item.Establishment.RegistryID != "R-LU-000710" || item.Establishment.Address != "AVDA. RAMÓN FERREIRO, 21" {
+		t.Errorf("registry fields = %+v", item.Establishment)
+	}
+	if item.Score == nil || item.Score.Tier != model.TierP0 {
+		t.Errorf("score = %+v, want a P0 score", item.Score)
+	}
+	if len(item.PrimarySignals) != 1 || item.PrimarySignals[0].Source != "google_maps_scraper" {
+		t.Errorf("primary signals = %+v", item.PrimarySignals)
+	}
+
+	// An unscored establishment is still in the queue: the detail screen
+	// must open it and show it as waiting, not 404.
+	rec = get(t, srv, "/api/establishments/H-LU-000469")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("unscored status = %d, want 200", rec.Code)
+	}
+	if waiting := decodeJSON[model.QueueItem](t, rec.Body.Bytes()); waiting.Score != nil {
+		t.Errorf("unscored item carries score %+v, want nil", waiting.Score)
+	}
+}
+
+func TestEstablishmentDetailUnknownID(t *testing.T) {
+	srv := newTestServer(t)
+	srv.SetReport(&model.Report{Queue: []model.QueueItem{
+		{Rank: 1, Establishment: &model.Establishment{ID: "rest-002", Name: "La Tasca"}},
+	}})
+
+	rec := get(t, srv, "/api/establishments/no-existe")
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", rec.Code)
+	}
+	var out map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &out); err != nil {
+		t.Fatalf("bad JSON: %v", err)
+	}
+	if out["error"] == "" {
+		t.Errorf("404 body = %v, want an error message", out)
 	}
 }
 

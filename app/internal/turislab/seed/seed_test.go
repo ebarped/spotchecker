@@ -298,3 +298,146 @@ func TestLoadDatasetsRequiresCSVFiles(t *testing.T) {
 		t.Error("Load succeeded with a missing datasets directory")
 	}
 }
+
+// reatRestauracion reproduces the REAT restaurant directory: a five-line
+// preamble, semicolons, and no coordinates, phone or website.
+const reatRestauracion = `Directorio de restauración do REAT
+ Data de referencia: 2026-11-01
+ Área de Estudos e Investigación
+ 
+ 
+"sinatura";"denominacion";"direccion";"lugar";"parroquia";"codigo_postal";"concello";"provincia";"tipoloxia"
+"R-LU-000710";"LA OCA";"AVDA. RAMÓN FERREIRO, 21";"";"";27002;"Lugo";"Lugo";"Restaurantes"
+"V-LU-003877";"BAR  RAYDY GRANDE LIGAS";"MILAGROSA nº 23, andar BJ";"";"";0;"Lugo";"Lugo";"Bares"
+"C-LU-000267";"GRAN CAFE";"RAMON FERREIRO nº 21";"";"";27002;"Lugo";"Lugo";"Cafeterias"
+`
+
+// reatAloxamentos reproduces the REAT accommodation directory: `tipo` holds
+// the establishment type, `categoria` the star rating, coordinates use comma
+// decimals, and `correo_promocional` must never become the email.
+const reatAloxamentos = `Directorio de aloxamentos do REAT
+ Data de referencia: 2026-11-01
+ Área de Estudos e Investigación
+ 
+ 
+"sinatura";"denominacion";"telefono";"tipo";"categoria";"lonxitude";"latitude";"correo_promocional";"direccion";"codigo_postal";"concello";"provincia"
+"H-LU-000469";"EUROSTARS GRAN HOTEL DE LUGO";"982224152";"HOTEIS";"4 ESTRELAS";"-7,55431";"43,00503";"CORREO@EXAMPLE.ES";"AVENIDA RAMÓN FERREIRO Nº 21";"27002";"LUGO";"LUGO"
+"H-LU-001017";"PENSION ALBERGUE LUCUS";"";"ALBERGUES TURÍSTICOS";"SEGUNDA CATEGORÍA";"-7,5499";"43,00519";"";"CALLE REI DON GARCÍA Nº 1";"0";"LUGO";"LUGO"
+"A-LU-000018";"APARTAMENTOS SIN COORDENADAS";"";"APARTAMENTOS TURÍSTICOS";"1 CHAVE";"0";"0";"";"CALLE CATASOL Nº 13";"27002";"LUGO";"LUGO"
+`
+
+func TestLoadDatasetsSkipsPreambleAndMapsREATRestauracion(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t)
+	dir := t.TempDir()
+	writeDataset(t, dir, "restauracion.csv", reatRestauracion)
+
+	res, err := seed.Load(ctx, s, seed.Options{DatasetsDir: dir, DefaultCountry: "ES", StrictValidation: true})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if res.Total != 3 || res.Loaded != 3 {
+		t.Fatalf("total/loaded = %d/%d, want 3/3 (errors: %v)", res.Total, res.Loaded, res.Errors)
+	}
+
+	oca, err := s.GetEstablishment(ctx, "R-LU-000710")
+	if err != nil {
+		t.Fatalf("GetEstablishment: %v", err)
+	}
+	if oca.Name != "LA OCA" || oca.Category != model.CategoryRestaurant {
+		t.Errorf("oca = %q / %q", oca.Name, oca.Category)
+	}
+	if oca.Address != "AVDA. RAMÓN FERREIRO, 21" || oca.Municipality != "Lugo" || oca.PostalCode != "27002" {
+		t.Errorf("oca address = %q / %q / %q", oca.Address, oca.Municipality, oca.PostalCode)
+	}
+	if oca.Lat != nil || oca.Lng != nil {
+		t.Errorf("restauración has no coordinates, got %v / %v", oca.Lat, oca.Lng)
+	}
+
+	bar, _ := s.GetEstablishment(ctx, "V-LU-003877")
+	if bar.Category != model.CategoryBar {
+		t.Errorf("Bares → %q, want bar", bar.Category)
+	}
+	if bar.PostalCode != "" {
+		t.Errorf("postal code 0 should be empty, got %q", bar.PostalCode)
+	}
+	cafe, _ := s.GetEstablishment(ctx, "C-LU-000267")
+	if cafe.Category != model.CategoryBar {
+		t.Errorf("Cafeterias → %q, want bar", cafe.Category)
+	}
+}
+
+func TestLoadDatasetsMapsREATAloxamentos(t *testing.T) {
+	ctx := context.Background()
+	s := openStore(t)
+	dir := t.TempDir()
+	writeDataset(t, dir, "aloxamentos.csv", reatAloxamentos)
+
+	if _, err := seed.Load(ctx, s, seed.Options{DatasetsDir: dir, DefaultCountry: "ES", StrictValidation: true}); err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+
+	hotel, err := s.GetEstablishment(ctx, "H-LU-000469")
+	if err != nil {
+		t.Fatalf("GetEstablishment: %v", err)
+	}
+	if hotel.Category != model.CategoryHotel {
+		t.Errorf("HOTEIS → %q, want hotel", hotel.Category)
+	}
+	if hotel.Stars == nil || *hotel.Stars != 4 {
+		t.Errorf("stars = %v, want 4", hotel.Stars)
+	}
+	if hotel.Lat == nil || *hotel.Lat != 43.00503 || hotel.Lng == nil || *hotel.Lng != -7.55431 {
+		t.Errorf("coords = %v / %v", hotel.Lat, hotel.Lng)
+	}
+	if hotel.Municipality != "Lugo" || hotel.Province != "Lugo" {
+		t.Errorf("place = %q / %q, want title-cased", hotel.Municipality, hotel.Province)
+	}
+	if hotel.Email != "" {
+		t.Errorf("correo_promocional leaked into email: %q", hotel.Email)
+	}
+	if hotel.Phone != "982224152" {
+		t.Errorf("phone = %q", hotel.Phone)
+	}
+
+	// "SEGUNDA CATEGORÍA" is not a star rating, and a 0/0 coordinate pair
+	// must not become a point in the Atlantic.
+	pension, _ := s.GetEstablishment(ctx, "H-LU-001017")
+	if pension.Stars != nil {
+		t.Errorf("SEGUNDA CATEGORÍA → stars %v, want nil", pension.Stars)
+	}
+	if pension.Category != model.CategoryOther {
+		t.Errorf("ALBERGUES → %q, want other", pension.Category)
+	}
+	if pension.PostalCode != "" {
+		t.Errorf("postal code 0 should be empty, got %q", pension.PostalCode)
+	}
+
+	// A 0/0 coordinate pair is a missing coordinate, not the Gulf of Guinea.
+	apt, _ := s.GetEstablishment(ctx, "A-LU-000018")
+	if apt.Lat != nil || apt.Lng != nil {
+		t.Errorf("0/0 coords should be nil, got %v / %v", apt.Lat, apt.Lng)
+	}
+	if apt.Stars != nil {
+		t.Errorf("1 CHAVE → stars %v, want nil", apt.Stars)
+	}
+}
+
+func TestLoadDatasetsFindsHeaderAfterLongPreamble(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	var b strings.Builder
+	for i := 0; i < 12; i++ {
+		b.WriteString("NOTA: texto legal del rexistro, sen datos de establecementos.\n")
+	}
+	b.WriteString("id;nombre;municipio\nrest-1;Restaurante Uno;Lugo\n")
+	writeDataset(t, dir, "export.csv", b.String())
+
+	res, err := seed.Load(ctx, openStore(t), seed.Options{DatasetsDir: dir})
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if res.Loaded != 1 {
+		t.Errorf("loaded = %d, want 1", res.Loaded)
+	}
+}

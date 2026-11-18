@@ -93,7 +93,7 @@ func TestOSMCollectTagSignals(t *testing.T) {
 		{"disused tourism", map[string]string{"disused:tourism": "hotel"}, "disused", 0.6, model.FamilyDirectStatus},
 		{"explicit closed", map[string]string{"closed": "yes"}, "closed", 0.6, model.FamilyDirectStatus},
 		{"vacant shop", map[string]string{"shop": "vacant"}, "vacant", 0.5, model.FamilyDirectStatus},
-		{"active with hours", map[string]string{"name": "Hotel Sol y Playa", "opening_hours": "Mo-Su 09:00-18:00"}, "found_active", 1.0, model.FamilyActivity},
+		{"active with hours", map[string]string{"name": "Hotel Sol y Playa", "opening_hours": "Mo-Su 09:00-18:00"}, "found_active", 0.0, model.FamilyActivity},
 	}
 
 	for _, tc := range cases {
@@ -184,8 +184,8 @@ func TestOSMCollectEmptyResponseIsNotFound(t *testing.T) {
 		t.Fatalf("signals = %d, want 1", len(sigs))
 	}
 	sig := sigs[0]
-	if sig.RawValue != "not_found" || sig.Value != 0.0 {
-		t.Errorf("signal = %q/%v, want not_found/0", sig.RawValue, sig.Value)
+	if sig.RawValue != "not_found" || sig.Value != 0.35 {
+		t.Errorf("signal = %q/%v, want not_found/0.35", sig.RawValue, sig.Value)
 	}
 	if sig.Confidence != 0.40 || sig.Weight != 0.20 {
 		t.Errorf("confidence/weight = %v/%v, want 0.40/0.20", sig.Confidence, sig.Weight)

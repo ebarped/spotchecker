@@ -155,15 +155,31 @@ func (w *WebsiteSource) Collect(ctx context.Context, est *model.Establishment) (
 	}
 
 	// ── KindWebStatus signal ──────────────────────────────────────────────────
+	// Value follows the one risk scale: 0 = looks alive, 1 = looks dead.
+	// A site that answers is evidence of activity; a 404 or a refused
+	// connection is evidence of abandonment. Anything else (TLS errors, DNS
+	// blocks, odd gateways) is weak evidence at best — a corporate or local
+	// DNS filter must not be able to fake a closure.
 	sig := NewSignal(est.ID, w.Name(), model.KindWebStatus, model.FamilyActivity)
 	sig.RawValue = statusText
-	sig.Confidence = 0.75
-	sig.Weight = 0.30
 	sig.TTLDays = w.cfg.CacheTTLDays
-	if statusOK {
-		sig.Value = 1.0
-	} else {
+	switch statusText {
+	case "ok":
 		sig.Value = 0.0
+		sig.Confidence = 0.75
+		sig.Weight = 0.30
+	case "404", "down":
+		sig.Value = 1.0
+		sig.Confidence = 0.65
+		sig.Weight = 0.30
+	default:
+		// A site that cannot be checked is not the same as a dead one, but
+		// it is not neutral either: combined with stale reviews it should
+		// push the risk up, just not as far as a 404 or a refused
+		// connection.
+		sig.Value = 0.7
+		sig.Confidence = 0.40
+		sig.Weight = 0.30
 	}
 	sig.DedupeKey = DedupeKey(est.ID, w.Name(), string(model.KindWebStatus), statusText)
 	signals = append(signals, sig)

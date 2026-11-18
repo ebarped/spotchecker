@@ -3,6 +3,7 @@ package scan
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"strings"
 	"sync"
@@ -244,6 +245,14 @@ func (s *Scanner) ScanOne(ctx context.Context, establishmentID string) error {
 
 	wg.Wait()
 
+	// Google Maps often knows the business website when the registry does
+	// not (REAT has no website column at all). When that happens, hand the
+	// URL to the website collector, which otherwise skips the establishment
+	// for lack of a site, and fold its signals in.
+	if target.Website == "" {
+		allSignals = append(allSignals, s.checkDiscoveredWebsite(ctx, target, enabled, allSignals)...)
+	}
+
 	for _, sig := range allSignals {
 		_ = s.store.SaveSignal(ctx, sig)
 	}
@@ -277,6 +286,8 @@ func (s *Scanner) ScanOne(ctx context.Context, establishmentID string) error {
 			score.JudgeStatus = verdict.Status
 			score.JudgeReason = verdict.Rationale
 			score.JudgeConfidence = verdict.Confidence
+			score.JudgeRisk = verdict.Risk
+			score.JudgeRiskKnown = true
 			if verdict.Status != score.HeuristicStatus {
 				s.log.Info("judge", "[%s] el juez corrige al motor: %s → %s",
 					target.ID, score.HeuristicStatus, verdict.Status)
@@ -284,13 +295,56 @@ func (s *Scanner) ScanOne(ctx context.Context, establishmentID string) error {
 		}
 	}
 
-	s.log.Info("scan", "[%s] score %s · riesgo de cierre %.0f%% · prioridad %.0f/100 · %d evidencias — %s",
-		target.ID, score.Tier, score.ClosureRisk*100, score.Priority, score.EvidenceCount, score.Reason)
+	riskText := "—"
+	if score.RiskKnown {
+		riskText = fmt.Sprintf("%.0f%%", score.ClosureRisk*100)
+	}
+	s.log.Info("scan", "[%s] score %s · riesgo de cierre %s · prioridad %.0f/100 · %d evidencias — %s",
+		target.ID, score.Tier, riskText, score.Priority, score.EvidenceCount, score.Reason)
 	if prevScore != nil && (prevScore.Status != score.Status || prevScore.Tier != score.Tier) {
 		s.log.Warn("scan", "[%s] cambio de veredicto: %s (%s) → %s (%s)",
 			target.ID, prevScore.Status, prevScore.Tier, score.Status, score.Tier)
 	}
 	_ = s.store.SaveScore(ctx, score)
+	return nil
+}
+
+// checkDiscoveredWebsite runs the website collector against a URL Google
+// Maps reported when the registry has none. It returns the collector's
+// signals (possibly none) and never fails the scan: a website that cannot be
+// checked is simply not evidence.
+func (s *Scanner) checkDiscoveredWebsite(ctx context.Context, target *model.Establishment, enabled []Source, collected []*model.Signal) []*model.Signal {
+	var url string
+	for _, sig := range collected {
+		if sig.Kind == model.KindWebsiteFound && sig.RawValue != "" {
+			url = sig.RawValue
+			break
+		}
+	}
+	if url == "" {
+		return nil
+	}
+
+	for _, src := range enabled {
+		if src.Name() != "website" {
+			continue
+		}
+		enriched := *target
+		enriched.Website = url
+
+		sigs, err := src.Collect(ctx, &enriched)
+		if err != nil {
+			s.log.Warn("source", "[%s] website (URL descubierta en Google Maps) error: %v", target.ID, err)
+			return nil
+		}
+		if len(sigs) == 0 {
+			s.log.Info("scan", "[%s] website (URL descubierta en Google Maps) no aportó señales", target.ID)
+			return nil
+		}
+		s.log.Info("scan", "[%s] website (URL descubierta en Google Maps: %s) → %d señales",
+			target.ID, url, len(sigs))
+		return sigs
+	}
 	return nil
 }
 

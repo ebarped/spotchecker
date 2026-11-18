@@ -2,10 +2,13 @@ package source
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
 )
@@ -290,5 +293,116 @@ func TestBestPlace(t *testing.T) {
 	// A name with no shared word falls back to the first result.
 	if got := bestPlace("Paprica", places); got.Title != "Mercure Lugo Centro" {
 		t.Errorf("no match falls back to the first result, got %q", got.Title)
+	}
+}
+
+func TestCollectEmitsWebsiteAndReviewRecency(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake binary is a POSIX shell script")
+	}
+
+	// 200 days: the "120-240d" bucket. The exact date is not asserted in
+	// raw_value, only that it is surfaced for the judge.
+	lastReview := time.Now().Add(-200 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	record := fmt.Sprintf(`{"title":"Apartamentos Catasol","place_id":"p-cat","status":"","review_rating":2.7,"review_count":3,"web_site":"https://apartamentoscatasol.com/","user_reviews":[{"published_at":%q},{"published_at":"2020-01-01T00:00:00Z"}]}`, lastReview)
+
+	src := NewGMapsScraper(GMapsScraperConfig{
+		Provider:       "gosom",
+		Binary:         fakeGosom(t, record),
+		TimeoutSeconds: 10,
+		MaxPlaces:      1,
+		Depth:          1,
+		Language:       "es",
+		Headless:       true,
+	})
+
+	signals, err := src.Collect(context.Background(), &model.Establishment{ID: "A-LU-000018", Name: "APARTAMENTOS CATASOL"})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+
+	var website, recency *model.Signal
+	for _, sig := range signals {
+		switch sig.Kind {
+		case model.KindWebsiteFound:
+			website = sig
+		case model.KindReviewRecency:
+			recency = sig
+		}
+	}
+
+	if website == nil {
+		t.Fatalf("no website_found signal in %+v", signals)
+	}
+	if website.RawValue != "https://apartamentoscatasol.com/" {
+		t.Errorf("website raw value = %q", website.RawValue)
+	}
+	if website.Weight != 0 || website.Family != model.FamilyContext {
+		t.Errorf("website signal = weight %v family %q, want a weightless context fact", website.Weight, website.Family)
+	}
+
+	if recency == nil {
+		t.Fatalf("no review_recency signal in %+v", signals)
+	}
+	if recency.Family != model.FamilyActivity {
+		t.Errorf("recency family = %q, want activity", recency.Family)
+	}
+	if recency.Value != 0.40 {
+		t.Errorf("recency value = %v, want 0.40 for the newest review (~200 days)", recency.Value)
+	}
+	if !strings.Contains(recency.RawValue, "hace 200 días") {
+		t.Errorf("recency raw value = %q, want the review date and age", recency.RawValue)
+	}
+}
+
+func TestCollectWithoutReviewsEmitsNoRecency(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("the fake binary is a POSIX shell script")
+	}
+
+	record := `{"title":"Sin Reseñas","place_id":"p-empty","review_rating":0,"review_count":0}`
+	src := NewGMapsScraper(GMapsScraperConfig{
+		Provider:       "gosom",
+		Binary:         fakeGosom(t, record),
+		TimeoutSeconds: 10,
+		MaxPlaces:      1,
+		Depth:          1,
+		Language:       "es",
+		Headless:       true,
+	})
+
+	signals, err := src.Collect(context.Background(), &model.Establishment{ID: "e1", Name: "Sin Reseñas"})
+	if err != nil {
+		t.Fatalf("Collect: %v", err)
+	}
+	for _, sig := range signals {
+		if sig.Kind == model.KindReviewRecency {
+			t.Fatalf("recency signal emitted with no reviews: %+v", sig)
+		}
+	}
+}
+
+func TestReviewRecencyRiskBuckets(t *testing.T) {
+	cases := []struct {
+		days float64
+		want float64
+	}{
+		{10, 0.0},
+		{45, 0.0},
+		{60, 0.15},
+		{120, 0.15},
+		{134, 0.40},
+		{182, 0.40},
+		{240, 0.40},
+		{300, 0.60},
+		{400, 0.60},
+		{600, 0.75},
+		{730, 0.75},
+		{859, 0.90},
+	}
+	for _, tc := range cases {
+		if got, _ := reviewRecencyRisk(tc.days); got != tc.want {
+			t.Errorf("reviewRecencyRisk(%v) = %v, want %v", tc.days, got, tc.want)
+		}
 	}
 }

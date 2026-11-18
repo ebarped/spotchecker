@@ -301,7 +301,7 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 					{
 						kind: 'web_status',
 						family: 'actividad',
-						detail: 'Valor 1 si la web responde (confianza 0,75, peso 0,30). Una web caída no es un cierre: es un síntoma débil.'
+						detail: 'Valor 0 si la web responde (confianza 0,75); 1,0 si da 404 o rechaza la conexión (confianza 0,65); 0,7 si no se puede comprobar (error, confianza 0,40). Peso 0,30. Una web caída no confirma un cierre, pero pesa.'
 					},
 					{
 						kind: 'web_keyword',
@@ -331,12 +331,12 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 					{
 						kind: 'osm_tag: found_active',
 						family: 'actividad',
-						detail: 'El POI existe y tiene horario: valor 1,0 con confianza 0,55 y peso 0,30.'
+						detail: 'El POI existe y tiene horario: valor 0,0 (vivo) con confianza 0,55 y peso 0,30.'
 					},
 					{
 						kind: 'osm_tag: not_found',
 						family: 'actividad',
-						detail: 'Nada alrededor del radio: valor 0,0 con confianza 0,40 y peso 0,20.'
+						detail: 'Nada alrededor del radio: valor 0,35 con confianza 0,40 y peso 0,20. La ausencia en OSM es normal en locales pequeños.'
 					}
 				],
 				config: 'overpass_url (oficial de Overpass) · timeout_seconds 30 · max_elements 5 · cache_ttl_days 30'
@@ -367,6 +367,16 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 						kind: 'review_count',
 						family: 'reseñas',
 						detail: 'Número de reseñas acumuladas, confianza 0,70 y peso 0,20: una caída brusca es un síntoma.'
+					},
+					{
+						kind: 'review_recency',
+						family: 'actividad',
+						detail: 'Días desde la última reseña: 0 hasta 45 días, 0,15 hasta 4 meses, 0,40 hasta 8 meses, 0,60 hasta 13 meses, 0,75 hasta 2 años y 0,90 más allá. Confianza 0,60 y peso 0,50: el silencio pesa, pero no prueba un cierre.'
+					},
+					{
+						kind: 'website_found',
+						family: 'contexto',
+						detail: 'URL que Google Maps conoce y el registro no: peso 0, solo alimenta al colector de la web, que la comprueba en el mismo scan.'
 					}
 				],
 				config: 'provider gosom · binary (bin/google-maps-scraper) · max_places 3 · depth 1 · lang es · cache_ttl_days 7 · headless'
@@ -470,17 +480,18 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 		status: 'partial',
 		tagline: 'Riesgo de cierre, prioridad y estado, con la confianza como freno.',
 		summary:
-			'El motor calcula el riesgo de cierre a partir de las señales de estado directo, lo combina con la antigüedad del último scan y lo corrige por confianza. La parte de calidad (riesgo y delta) está modelada y ponderada, pero todavía no se calcula.',
+			'El motor calcula el riesgo de cierre a partir de las señales de estado directo y de actividad (web oficial, antigüedad de la última reseña, OSM), lo combina con la antigüedad del último scan y lo corrige por confianza. Sin evidencia sobre el estado operativo el riesgo queda sin medir (—), no en 0. La parte de calidad (riesgo y delta) está modelada y ponderada, pero todavía no se calcula.',
 		facts: [
 			{ label: 'Cierre confirmado', value: 'closure_risk ≥ 0,85' },
 			{ label: 'Cierre sospechado', value: 'closure_risk ≥ 0,60' },
+			{ label: 'Sin evidencia de estado', value: 'unknown · riesgo —' },
 			{ label: 'Confianza', value: 'factor 0,7 + 0,3 × confianza' },
 			{ label: 'Histéresis', value: 'cambio < 15 pts → mezcla 30 %' }
 		],
 		flow: [
 			{
 				title: 'Riesgo de cierre',
-				body: 'Media ponderada de las señales de estado directo, con decaimiento.',
+				body: 'Media ponderada de estado directo y actividad (web, reseñas, OSM), con decaimiento y un prior cuando no hay estado directo.',
 				status: 'done'
 			},
 			{
@@ -526,14 +537,15 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 			rows: [
 				{ cells: ['closure_risk ≥ 0,85', 'closure_confirmed'], status: 'done' },
 				{ cells: ['closure_risk ≥ 0,60', 'closure_suspected'], status: 'done' },
-				{ cells: ['closure_risk < 0,60', 'active'], status: 'done' },
+				{ cells: ['closure_risk < 0,60 con señal de actividad', 'active'], status: 'done' },
+				{ cells: ['sin evidencia sobre el estado operativo', 'unknown (riesgo —)'], status: 'done' },
 				{ cells: ['cierre directo encontrado', 'suelo de riesgo 0,80'], status: 'done' },
 				{ cells: ['apertura directa encontrada', 'techo de riesgo 0,35'], status: 'done' },
 				{ cells: ['cierre y apertura a la vez', 'conflicto, techo 0,70'], status: 'done' }
 			]
 		},
 		implemented: [
-			'Riesgo de cierre a partir de señales de estado directo y business status.',
+			'Riesgo de cierre a partir de estado directo, business status y actividad (web, reseñas, OSM).',
 			'Suelos/techos cuando hay evidencia directa de cierre o apertura.',
 			'Detección y marcado de conflicto entre fuentes.',
 			'Prioridad con riesgo de cierre, antigüedad y factor de confianza.',
@@ -558,7 +570,7 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 		status: 'done',
 		tagline: 'Toda la evidencia sobre la mesa y un LLM que firma el estado final.',
 		summary:
-			'Después del motor determinista, un LLM recibe el expediente completo del establecimiento —datos del registro, cada señal con su fuente, antigüedad y confianza, y el veredicto heurístico del motor como referencia— y emite el estado final con una justificación legible. El motor decide quién va primero en la cola (prioridad y tier); el juez decide en qué estado está el local.',
+			'Después del motor determinista, un LLM recibe el expediente completo del establecimiento —datos del registro, cada señal con su fuente, antigüedad y confianza, y el veredicto heurístico del motor como referencia— y emite el estado final, su propio riesgo de cierre y una justificación legible. El motor decide quién va primero en la cola (prioridad y tier); el juez decide en qué estado está el local y firma un segundo riesgo, que la ficha muestra junto al del motor.',
 		facts: [
 			{ label: 'Modelo', value: 'judge.model — vacío reusa agent.model' },
 			{ label: 'Temperatura', value: '0 — el juez quiere determinismo' },
@@ -578,12 +590,12 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 			},
 			{
 				title: 'Juez LLM',
-				body: 'El modelo recibe el expediente con un system prompt en español y responde JSON {verdict, confidence, rationale} a temperatura 0.',
+				body: 'El modelo recibe el expediente con un system prompt en español y responde JSON {verdict, confidence, risk, rationale} a temperatura 0.',
 				status: 'done'
 			},
 			{
 				title: 'Veredicto final',
-				body: 'La respuesta se valida (estados permitidos, confianza 0–1, justificación acotada) y sustituye al estado sugerido del motor.',
+				body: 'La respuesta se valida (estados permitidos, confianza y riesgo 0–1, justificación acotada) y sustituye al estado sugerido del motor. El riesgo del juez se guarda aparte (judge_risk) y la ficha lo muestra junto al del motor.',
 				status: 'done'
 			},
 			{
@@ -620,6 +632,7 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 			'Paquete judge: dossier de evidencia, system prompt en español y respuesta JSON estricta.',
 			'Parseo tolerante: fences de markdown y prosa alrededor no rompen el veredicto.',
 			'El veredicto del motor se conserva (heuristic_status, heuristic_reason) para comparar decisiones.',
+			'El juez emite su propio riesgo de cierre (judge_risk) sobre todas las señales; la ficha muestra motor y juez, ambos 0–100%.',
 			'Fallo aislado: el error del juez se guarda (judge_error) y el veredicto del motor se mantiene.',
 			'Modelo compartido con el agente: judge.model vacío reusa agent.model y su API key.',
 			'Solo se juzga con evidencia: sin señales, el veredicto del motor pasa directamente.'
@@ -632,7 +645,7 @@ export const PIPELINE_DETAILS: PhaseDetail[] = [
 			'Exponer el coste acumulado del juez en el scan.'
 		],
 		note:
-			'El juez decide solo el estado final; la prioridad y el tier siguen siendo del motor determinista, así que la posición en la cola nunca depende de una llamada al modelo. Un local sin ninguna señal ni score tampoco se juzga.'
+			'El juez decide el estado final y su riesgo; la prioridad y el tier siguen siendo del motor determinista, así que la posición en la cola nunca depende de una llamada al modelo. Un local sin ninguna señal ni score tampoco se juzga.'
 	},
 	{
 		id: 6,

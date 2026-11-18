@@ -129,6 +129,9 @@ func (s *SQLiteStore) migrate() error {
 		judge_reason TEXT NOT NULL DEFAULT '',
 		judge_confidence REAL NOT NULL DEFAULT 0,
 		judge_error TEXT NOT NULL DEFAULT '',
+		judge_risk REAL NOT NULL DEFAULT 0,
+		judge_risk_known INTEGER NOT NULL DEFAULT 0,
+		risk_known INTEGER NOT NULL DEFAULT 0,
 		updated_at TEXT
 	);
 
@@ -155,6 +158,13 @@ var scoreColumns = []struct{ name, decl string }{
 	{"judge_reason", "TEXT NOT NULL DEFAULT ''"},
 	{"judge_confidence", "REAL NOT NULL DEFAULT 0"},
 	{"judge_error", "TEXT NOT NULL DEFAULT ''"},
+	// Rows written before the judge reported its own risk keep 0, but the
+	// known flag stays false so the UI renders "—" instead of a fake 0%.
+	{"judge_risk", "REAL NOT NULL DEFAULT 0"},
+	{"judge_risk_known", "INTEGER NOT NULL DEFAULT 0"},
+	// Rows written before the engine could tell "no risk measured" from
+	// "zero risk" keep 0: the UI shows them as unknown until the next scan.
+	{"risk_known", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // migrateScores adds the score columns an older database misses.
@@ -292,17 +302,79 @@ func (s *SQLiteStore) SaveSignal(ctx context.Context, sig *model.Signal) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	colAt := sig.CollectedAt.UTC().Format(time.RFC3339)
 
+	// A signal without a dedupe key must not be deduplicated: an empty string
+	// would make the UNIQUE index collapse every keyless signal into a single
+	// row. Falling back to the signal id keeps every insert distinct while
+	// the column stays NOT NULL for the readers.
+	dedupeKey := sig.DedupeKey
+	if dedupeKey == "" {
+		dedupeKey = "nokey:" + sig.ID
+	}
+
+	// Re-observing the same fact (same dedupe key) must refresh the stored
+	// interpretation, not keep the first one forever. Otherwise a change in
+	// the rules — a new website status value, a review crossing a recency
+	// bucket — never reaches the score of an establishment that was already
+	// scanned once. The row keeps its original id; the evidence timestamp and
+	// the derived fields move to the newest observation so the signal does
+	// not age out while it is still being collected.
 	query := `
-	INSERT OR IGNORE INTO signals (
+	INSERT INTO signals (
 		id, establishment_id, source_name, kind, collected_at, value, raw_value,
 		confidence, weight, family, dedupe_key, ttl_days, error, payload, created_at
 	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(dedupe_key) DO UPDATE SET
+		collected_at = excluded.collected_at,
+		value        = excluded.value,
+		raw_value    = excluded.raw_value,
+		confidence   = excluded.confidence,
+		weight       = excluded.weight,
+		family       = excluded.family,
+		ttl_days     = excluded.ttl_days,
+		error        = excluded.error,
+		payload      = excluded.payload
 	`
 	_, err := s.db.ExecContext(ctx, query,
 		sig.ID, sig.EstablishmentID, sig.SourceName, string(sig.Kind), colAt, sig.Value, sig.RawValue,
-		sig.Confidence, sig.Weight, string(sig.Family), sig.DedupeKey, sig.TTLDays, sig.Error, sig.Payload, now,
+		sig.Confidence, sig.Weight, string(sig.Family), dedupeKey, sig.TTLDays, sig.Error, sig.Payload, now,
 	)
 	return err
+}
+
+// ListSignalsSince returns every signal collected at or after since, newest
+// first. The report uses it to expose the evidence behind each score without
+// one query per establishment.
+func (s *SQLiteStore) ListSignalsSince(ctx context.Context, since time.Time) ([]*model.Signal, error) {
+	sinceStr := since.UTC().Format(time.RFC3339)
+	query := `SELECT id, establishment_id, source_name, kind, collected_at, value, raw_value, confidence, weight, family, dedupe_key, ttl_days, error, payload FROM signals WHERE collected_at >= ? ORDER BY collected_at DESC`
+	rows, err := s.db.QueryContext(ctx, query, sinceStr)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var list []*model.Signal
+	for rows.Next() {
+		var sig model.Signal
+		var kind, family string
+		var colAt string
+		var payload []byte
+		err := rows.Scan(
+			&sig.ID, &sig.EstablishmentID, &sig.SourceName, &kind, &colAt, &sig.Value, &sig.RawValue,
+			&sig.Confidence, &sig.Weight, &family, &sig.DedupeKey, &sig.TTLDays, &sig.Error, &payload,
+		)
+		if err != nil {
+			return nil, err
+		}
+		sig.Kind = model.SignalKind(kind)
+		sig.Family = model.SignalFamily(family)
+		sig.Payload = payload
+		if t, err := time.Parse(time.RFC3339, colAt); err == nil {
+			sig.CollectedAt = t
+		}
+		list = append(list, &sig)
+	}
+	return list, rows.Err()
 }
 
 func (s *SQLiteStore) ListSignals(ctx context.Context, establishmentID string, since time.Time) ([]*model.Signal, error) {
@@ -347,8 +419,8 @@ func (s *SQLiteStore) SaveScore(ctx context.Context, sc *model.Score) error {
 		establishment_id, computed_at, closure_risk, quality_risk, quality_delta,
 		priority, tier, confidence, evidence_count, status, reason, volatile, conflict_detected,
 		heuristic_status, heuristic_reason, judge_model, judge_status, judge_reason,
-		judge_confidence, judge_error, updated_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		judge_confidence, judge_error, judge_risk, judge_risk_known, risk_known, updated_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(establishment_id) DO UPDATE SET
 		computed_at=excluded.computed_at, closure_risk=excluded.closure_risk, quality_risk=excluded.quality_risk,
 		quality_delta=excluded.quality_delta, priority=excluded.priority, tier=excluded.tier,
@@ -356,27 +428,29 @@ func (s *SQLiteStore) SaveScore(ctx context.Context, sc *model.Score) error {
 		reason=excluded.reason, volatile=excluded.volatile, conflict_detected=excluded.conflict_detected,
 		heuristic_status=excluded.heuristic_status, heuristic_reason=excluded.heuristic_reason,
 		judge_model=excluded.judge_model, judge_status=excluded.judge_status, judge_reason=excluded.judge_reason,
-		judge_confidence=excluded.judge_confidence, judge_error=excluded.judge_error, updated_at=excluded.updated_at
+		judge_confidence=excluded.judge_confidence, judge_error=excluded.judge_error,
+		judge_risk=excluded.judge_risk, judge_risk_known=excluded.judge_risk_known,
+		risk_known=excluded.risk_known, updated_at=excluded.updated_at
 	`
 	_, err := s.db.ExecContext(ctx, query,
 		sc.EstablishmentID, compAt, sc.ClosureRisk, sc.QualityRisk, sc.QualityDelta,
 		sc.Priority, string(sc.Tier), sc.Confidence, sc.EvidenceCount, string(sc.Status),
 		sc.Reason, boolToInt(sc.Volatile), boolToInt(sc.ConflictDetected),
 		string(sc.HeuristicStatus), sc.HeuristicReason, sc.JudgeModel, string(sc.JudgeStatus),
-		sc.JudgeReason, sc.JudgeConfidence, sc.JudgeError, now,
+		sc.JudgeReason, sc.JudgeConfidence, sc.JudgeError, sc.JudgeRisk, boolToInt(sc.JudgeRiskKnown), boolToInt(sc.RiskKnown), now,
 	)
 	return err
 }
 
 // scoreColumnsQuery lists every score column in scan order.
-const scoreColumnsQuery = `establishment_id, computed_at, closure_risk, quality_risk, quality_delta, priority, tier, confidence, evidence_count, status, reason, volatile, conflict_detected, heuristic_status, heuristic_reason, judge_model, judge_status, judge_reason, judge_confidence, judge_error`
+const scoreColumnsQuery = `establishment_id, computed_at, closure_risk, quality_risk, quality_delta, priority, tier, confidence, evidence_count, status, reason, volatile, conflict_detected, heuristic_status, heuristic_reason, judge_model, judge_status, judge_reason, judge_confidence, judge_error, judge_risk, judge_risk_known, risk_known`
 
 // scanScore reads one score row produced by scoreColumnsQuery.
 func scanScore(row interface{ Scan(dest ...any) error }) (*model.Score, error) {
 	var sc model.Score
 	var compAt string
 	var tier, status string
-	var vol, confDet int
+	var vol, confDet, riskKnown, judgeRiskKnown int
 	var heurStatus, heurReason, judgeModel, judgeStatus, judgeReason, judgeError string
 
 	err := row.Scan(
@@ -384,7 +458,7 @@ func scanScore(row interface{ Scan(dest ...any) error }) (*model.Score, error) {
 		&sc.Priority, &tier, &sc.Confidence, &sc.EvidenceCount, &status,
 		&sc.Reason, &vol, &confDet,
 		&heurStatus, &heurReason, &judgeModel, &judgeStatus, &judgeReason,
-		&sc.JudgeConfidence, &judgeError,
+		&sc.JudgeConfidence, &judgeError, &sc.JudgeRisk, &judgeRiskKnown, &riskKnown,
 	)
 	if err != nil {
 		return nil, err
@@ -393,6 +467,8 @@ func scanScore(row interface{ Scan(dest ...any) error }) (*model.Score, error) {
 	sc.Status = model.StatusSuggested(status)
 	sc.Volatile = vol == 1
 	sc.ConflictDetected = confDet == 1
+	sc.RiskKnown = riskKnown == 1
+	sc.JudgeRiskKnown = judgeRiskKnown == 1
 	sc.HeuristicStatus = model.StatusSuggested(heurStatus)
 	sc.HeuristicReason = heurReason
 	sc.JudgeModel = judgeModel

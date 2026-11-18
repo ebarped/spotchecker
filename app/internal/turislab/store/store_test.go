@@ -155,13 +155,14 @@ func TestSaveSignalDedupe(t *testing.T) {
 		t.Fatalf("SaveEstablishment: %v", err)
 	}
 
+	firstSeen := time.Now().UTC().Add(-time.Hour)
 	base := &model.Signal{
 		ID:              "sig-001",
 		EstablishmentID: "est-dedupe",
 		SourceName:      "osm",
 		Kind:            model.KindOSMTag,
 		Family:          model.FamilyDirectStatus,
-		CollectedAt:     time.Now().UTC(),
+		CollectedAt:     firstSeen,
 		Value:           1,
 		RawValue:        "disused",
 		Confidence:      0.9,
@@ -175,12 +176,18 @@ func TestSaveSignalDedupe(t *testing.T) {
 		t.Fatalf("SaveSignal (first): %v", err)
 	}
 
-	// Second insert with the same DedupeKey but a different ID must be silently
-	// ignored (OR IGNORE semantics).
-	dup := *base
-	dup.ID = "sig-002" // different PK
-	dup.Value = 0      // different payload — must NOT overwrite the original
-	if err := s.SaveSignal(ctx, &dup); err != nil {
+	// Re-observing the same fact with the same DedupeKey must update the row
+	// in place: one signal, with the newest interpretation. Keeping the first
+	// interpretation forever meant a recalibrated value never reached an
+	// establishment that had already been scanned.
+	again := *base
+	again.ID = "sig-002" // different PK
+	again.CollectedAt = time.Now().UTC()
+	again.Value = 0
+	again.Confidence = 0.5
+	again.Weight = 0.4
+	again.RawValue = "disused (revisado)"
+	if err := s.SaveSignal(ctx, &again); err != nil {
 		t.Fatalf("SaveSignal (duplicate): %v", err)
 	}
 
@@ -191,14 +198,65 @@ func TestSaveSignalDedupe(t *testing.T) {
 		t.Fatalf("ListSignals: %v", err)
 	}
 	if len(signals) != 1 {
-		t.Errorf("signal count after dedupe: got %d, want 1", len(signals))
+		t.Fatalf("signal count after dedupe: got %d, want 1", len(signals))
 	}
-	// The stored value should be from the first insert, not the duplicate.
-	if signals[0].Value != 1 {
-		t.Errorf("signal Value: got %v, want 1 (first insert)", signals[0].Value)
+	// The stored row carries the newest interpretation, not the first one.
+	if signals[0].Value != 0 {
+		t.Errorf("signal Value: got %v, want 0 (latest observation)", signals[0].Value)
+	}
+	if signals[0].Confidence != 0.5 {
+		t.Errorf("signal Confidence: got %v, want 0.5 (latest observation)", signals[0].Confidence)
+	}
+	if signals[0].Weight != 0.4 {
+		t.Errorf("signal Weight: got %v, want 0.4 (latest observation)", signals[0].Weight)
+	}
+	if signals[0].RawValue != "disused (revisado)" {
+		t.Errorf("signal RawValue: got %q, want the latest observation", signals[0].RawValue)
+	}
+	if !signals[0].CollectedAt.After(firstSeen) {
+		t.Errorf("signal CollectedAt: got %v, want the latest observation time", signals[0].CollectedAt)
 	}
 	if signals[0].ID != "sig-001" {
-		t.Errorf("signal ID: got %q, want \"sig-001\"", signals[0].ID)
+		t.Errorf("signal ID: got %q, want \"sig-001\" (row updated in place)", signals[0].ID)
+	}
+}
+
+// TestSaveSignalWithoutDedupeKey verifies that signals that do not provide a
+// dedupe key are all stored: an empty key must not act as a shared UNIQUE
+// value and swallow every later insert.
+func TestSaveSignalWithoutDedupeKey(t *testing.T) {
+	ctx := context.Background()
+	s := openTestStore(t)
+
+	est := &model.Establishment{ID: "est-nokey", Name: "No Key Test"}
+	if err := s.SaveEstablishment(ctx, est); err != nil {
+		t.Fatalf("SaveEstablishment: %v", err)
+	}
+
+	for _, id := range []string{"sig-a", "sig-b"} {
+		sig := &model.Signal{
+			ID:              id,
+			EstablishmentID: "est-nokey",
+			SourceName:      "manual",
+			Kind:            model.KindReviewText,
+			Family:          model.FamilyContext,
+			CollectedAt:     time.Now().UTC(),
+			Value:           0.5,
+			RawValue:        id,
+			Confidence:      0.5,
+			Weight:          0.2,
+		}
+		if err := s.SaveSignal(ctx, sig); err != nil {
+			t.Fatalf("SaveSignal (%s): %v", id, err)
+		}
+	}
+
+	signals, err := s.ListSignals(ctx, "est-nokey", time.Time{})
+	if err != nil {
+		t.Fatalf("ListSignals: %v", err)
+	}
+	if len(signals) != 2 {
+		t.Errorf("signal count without dedupe key: got %d, want 2", len(signals))
 	}
 }
 
@@ -314,6 +372,11 @@ func TestSaveAndGetScore(t *testing.T) {
 		Reason:           "Google Maps e OSM reportan cierre prolongado",
 		Volatile:         true,
 		ConflictDetected: false,
+		RiskKnown:        true,
+		JudgeModel:       "test-model",
+		JudgeStatus:      model.StatusClosureSuspected,
+		JudgeRisk:        0.42,
+		JudgeRiskKnown:   true,
 	}
 
 	if err := s.SaveScore(ctx, sc); err != nil {
@@ -348,6 +411,15 @@ func TestSaveAndGetScore(t *testing.T) {
 	}
 	if got.EvidenceCount != sc.EvidenceCount {
 		t.Errorf("EvidenceCount: got %d, want %d", got.EvidenceCount, sc.EvidenceCount)
+	}
+	if !got.RiskKnown {
+		t.Error("RiskKnown: got false, want true (the column must round-trip)")
+	}
+	if got.JudgeRisk != sc.JudgeRisk {
+		t.Errorf("JudgeRisk: got %v, want %v", got.JudgeRisk, sc.JudgeRisk)
+	}
+	if !got.JudgeRiskKnown {
+		t.Error("JudgeRiskKnown: got false, want true (the column must round-trip)")
 	}
 
 	// Upsert: update priority and re-save.

@@ -1,6 +1,7 @@
 package scoring_test
 
 import (
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -184,5 +185,109 @@ func TestErroredSignalsAreIgnored(t *testing.T) {
 	score := engine().Compute(est("e1"), []*model.Signal{broken}, nil, 100)
 	if score.Status != model.StatusUnknown {
 		t.Errorf("status = %q, want unknown when every signal errored", score.Status)
+	}
+}
+
+func TestReviewsAloneDoNotMeasureRisk(t *testing.T) {
+	// Catasol's original evidence: a rating and a review count, both from
+	// the reviews family. They say how the place was rated, not whether it
+	// still exists, so the risk must stay unmeasured instead of 0%.
+	signals := []*model.Signal{
+		signal(model.KindRating, model.FamilyReviews, "2.7", 2.7, 0.70, 0.30),
+		signal(model.KindReviewCount, model.FamilyReviews, "3", 3, 0.70, 0.20),
+	}
+	score := engine().Compute(est("e1"), signals, nil, 100)
+
+	if score.RiskKnown {
+		t.Error("risk_known = true, but no signal measured the operational state")
+	}
+	if score.ClosureRisk != 0 {
+		t.Errorf("closure_risk = %.2f, want 0 (unmeasured)", score.ClosureRisk)
+	}
+	if score.Status != model.StatusUnknown {
+		t.Errorf("status = %q, want unknown", score.Status)
+	}
+	if score.Reason != "Sin evidencia sobre el estado operativo" {
+		t.Errorf("reason = %q", score.Reason)
+	}
+	if score.EvidenceCount != 2 {
+		t.Errorf("evidence_count = %d, want 2 (the reviews still count as evidence)", score.EvidenceCount)
+	}
+}
+
+func TestActivitySignalsRaiseRiskWithoutDirectStatus(t *testing.T) {
+	// Dead website + a listing with no new review in years: two independent
+	// activity signals must be able to reach "suspected" on their own. The
+	// prior still keeps either one of them from claiming a closure alone.
+	signals := []*model.Signal{
+		signal(model.KindWebStatus, model.FamilyActivity, "down", 1.0, 0.65, 0.30),
+		signal(model.KindReviewRecency, model.FamilyActivity, "2023-01-01", 0.9, 0.60, 0.50),
+	}
+	score := engine().Compute(est("e1"), signals, nil, 100)
+
+	if !score.RiskKnown {
+		t.Fatal("risk_known = false, want true with activity evidence")
+	}
+	if want := 0.698; math.Abs(score.ClosureRisk-want) > 0.01 {
+		t.Errorf("closure_risk = %.3f, want ~%.3f", score.ClosureRisk, want)
+	}
+	if score.Status != model.StatusClosureSuspected {
+		t.Errorf("status = %q, want closure_suspected: dead site + years of silence", score.Status)
+	}
+}
+
+func TestDeadSiteAndSixMonthsOfSilenceBeatTwentyPercent(t *testing.T) {
+	// The case that motivated the recalibration: a site that cannot be
+	// checked and a listing whose newest review is six months old. Neither
+	// confirms a closure, but together they must not read as 20%.
+	signals := []*model.Signal{
+		signal(model.KindWebStatus, model.FamilyActivity, "error", 0.7, 0.40, 0.30),
+		signal(model.KindReviewRecency, model.FamilyActivity, "2026-05-19 (hace 182 días)", 0.40, 0.60, 0.50),
+	}
+	score := engine().Compute(est("e1"), signals, nil, 100)
+
+	if !score.RiskKnown {
+		t.Fatal("risk_known = false, want true with activity evidence")
+	}
+	if score.ClosureRisk <= 0.20 {
+		t.Errorf("closure_risk = %.3f, want > 0.20 with a dead site and six months of silence", score.ClosureRisk)
+	}
+	if score.Status != model.StatusUnknown {
+		t.Errorf("status = %q, want unknown: two indirect signals are not a confirmed closure", score.Status)
+	}
+}
+
+func TestAliveActivityKeepsRiskLow(t *testing.T) {
+	// The website answers and the listing gets fresh reviews: the business
+	// looks alive even without a direct Google status.
+	signals := []*model.Signal{
+		signal(model.KindWebStatus, model.FamilyActivity, "ok", 0.0, 0.75, 0.30),
+		signal(model.KindReviewRecency, model.FamilyActivity, "2026-11-01 (hace 16 días)", 0.0, 0.60, 0.50),
+	}
+	score := engine().Compute(est("e1"), signals, nil, 100)
+
+	if !score.RiskKnown {
+		t.Fatal("risk_known = false, want true with activity evidence")
+	}
+	if score.ClosureRisk > 0.10 {
+		t.Errorf("closure_risk = %.3f, want <= 0.10 when every activity signal is alive", score.ClosureRisk)
+	}
+	if score.Status != model.StatusActive {
+		t.Errorf("status = %q, want active", score.Status)
+	}
+}
+
+func TestWebsiteFactIsNotEvidence(t *testing.T) {
+	// KindWebsiteFound only tells the scanner which URL to check.
+	signals := []*model.Signal{
+		signal(model.KindWebsiteFound, model.FamilyContext, "https://example.org", 0, 0.90, 0),
+	}
+	score := engine().Compute(est("e1"), signals, nil, 100)
+
+	if score.EvidenceCount != 0 {
+		t.Errorf("evidence_count = %d, want 0: a URL is not evidence", score.EvidenceCount)
+	}
+	if score.RiskKnown {
+		t.Error("risk_known = true, but a fact says nothing about the business state")
 	}
 }

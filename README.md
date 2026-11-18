@@ -25,13 +25,26 @@ verdict before driving anywhere.
    plus optional `google_places`, `overture`, `phone`, `registry`, `news`,
    `yelp` and `tripadvisor`.
 3. **Signals** — each source contributes dated, weighted signals
-   (`website down`, `osm disused:tourism`, `maps status permanently closed`…)
-   stored with full provenance.
-4. **Scoring** — closure risk (direct status, activity, context, official
-   sources) and quality risk (reviews, official, product, news, freshness)
-   combine into a priority score adjusted by signal confidence, hysteresis and
-   staleness.
+   (`website down`, `osm disused:tourism`, `maps status permanently closed`,
+   `last Google review 2 years ago`…), stored with full provenance. When the
+   registry carries no website, the one Google Maps knows is handed to the
+   website collector, so the site is checked anyway.
+4. **Scoring** — closure risk averages the signals that say something about
+   the business being open: the direct status (Google Maps, OSM) and the
+   activity signals (website status, age of the newest review, OSM tags),
+   with a small prior when there is no direct status. Reviews and quality
+   signals do not move the closure risk. Priority adds staleness and is
+   adjusted by signal confidence and hysteresis.
 5. **Queue** — establishments are tiered and the report ranks the visit queue.
+6. **Judge (optional)** — an LLM reviews the same dossier, issues the final
+   status with a rationale and its own closure risk over every signal. The
+   detail screen shows both numbers side by side: the engine's risk and the
+   judge's.
+
+`Signal.Value` has one meaning across every family: `0` looks alive, `1`
+looks closed. When no signal measured the operational state the score says
+`risk_known: false` and the UI shows `—` instead of a misleading `0%`. The
+judge's risk carries the same guard (`judge_risk_known`).
 
 ## Tiers
 
@@ -44,7 +57,8 @@ verdict before driving anywhere.
 
 The suggested status of each establishment is `active`,
 `closure_suspected`, `closure_confirmed`, `closed_temporarily`, `seasonal`
-or `unknown`.
+or `unknown` (nothing measured whether it is still open — not the same as
+"looks fine").
 
 ## Usage
 
@@ -86,8 +100,8 @@ by `id`. The log shows the directory and a per-file count:
 
 ```
 INFO seed  datasets dir: app/datasets (1 csv files)
-INFO seed    lugo.csv: 11/11 registros (0 omitidos)
-INFO seed  loaded 11/11 establishments (0 skipped)
+INFO seed    lugo.csv: 10/10 registros (0 omitidos)
+INFO seed  loaded 10/10 establishments (0 skipped)
 ```
 
 `input.datasets_dir` in the config is the directory to use: `./datasets`
@@ -99,21 +113,23 @@ single-file mode (JSON or NDJSON) for one-off imports.
 
 - UTF-8, one header row, one row per establishment.
 - Delimiter `,` or `;` (a UTF-8 BOM is fine).
+- Any preamble before the header row is skipped, so official exports can be
+  dropped in as they arrive.
 - The `name` column is the only mandatory one; if `id` is missing or empty,
   the platform generates a stable `gen-…` id from name + address + municipality.
 - Quote fields containing the delimiter or line breaks (`"Calle Falsa, 1"`).
 - Empty cells are allowed; `input.default_country` fills in `country` when empty.
 
-Canonical column names (Spanish aliases such as `nombre`, `dirección`,
-`categoría`, `latitud`, `teléfono`, `código_postal` also work; extra columns
-are ignored):
+Canonical column names (Spanish aliases such as `nombre`, `denominación`,
+`concello`, `latitud`, `lonxitude`, `tipoloxía`, `teléfono`, `código_postal`
+also work; extra columns are ignored):
 
 | Column | Type | Notes |
 |--------|------|-------|
 | `id` | text | Stable identifier; generated if absent |
 | `name` | text | **Required**; rows with an empty name are skipped |
 | `category` | text | `restaurant`, `hotel`, `bar` or `other`; anything else becomes `other` |
-| `stars` | integer | e.g. `4` |
+| `stars` | integer | `4`, or `4 ESTRELAS` from a rating column |
 | `address`, `municipality`, `province`, `postal_code`, `country` | text | `country`: ISO 3166-1 alpha-2 |
 | `lat`, `lng` | decimal | e.g. `43.0112`, `-7.5572` (also `43,0112` with `;` delimiter) |
 | `phone`, `email`, `website` | text | |
@@ -122,7 +138,7 @@ are ignored):
 | `last_inspection_at` | date | `2024-05-14T00:00:00Z`, `2024-05-14` or `14/05/2024` |
 | `last_inspection_result` | text | e.g. `Correcto` |
 | `google_place_id`, `tripadvisor_id`, `yelp_id`, `osm_id` | text | External ids |
-| `notes` | text | |
+| `notes` | text | Never ground truth: the judge reads it |
 | `id_generated` | boolean | `true` / `false` |
 
 Minimal example (`app/datasets/ejemplo.csv`):
@@ -138,6 +154,25 @@ complete example with all the columns. `input.strict_validation: true` makes
 the startup fail on an invalid row; with `false`, invalid rows are skipped and
 listed in the log.
 
+#### Official source: REAT
+
+The bundled dataset is built from the
+[REAT registry](https://aei.turismo.gal/es/rexistro-de-empresas-e-actividades-turisticas)
+of Turismo de Galicia (reference date 2026-11-01):
+
+```bash
+make datasets    # regenerate app/datasets/lugo.csv from the official CSVs
+```
+
+`app/cmd/reat2csv` downloads the restaurant and accommodation directories,
+filters by municipality and area and writes the canonical CSV. Accommodation
+rows are selected by distance from an anchor (VUTs are excluded: none of them
+carry coordinates); restaurants have no coordinates at all, so they are
+selected by street. `make datasets REAT_FLAGS="..."` overrides the defaults.
+
+See [`AGENTS.md`](AGENTS.md) for the full dataset contract, the mapping rules
+and the checklist to follow when adding a new one.
+
 Because loading is an upsert, removing a CSV does not remove its rows from an
 existing database. Run `make clean` to drop `turislab.db` when swapping
 datasets.
@@ -150,8 +185,12 @@ The binary runs a small [chi](https://github.com/go-chi/chi) server:
 - `GET /api/report` — the full report as JSON
 - `GET /api/report/export` — the same JSON as a download attachment
 - `GET /api/summary` — rollup counts by tier and status
-- `GET /api/queue` — the ordered visit queue
+- `GET /api/queue` — the ordered visit queue (`tier`, `category`,
+  `municipality`, `q`, `limit`, `offset`; `q` matches the name or the id)
 - `GET /api/establishments` — the establishment list
+- `GET /api/establishments/{id}` — one queue entry in full: registry fields,
+  score breakdown (judge verdict included) and its primary evidence. 404 when
+  the id is not in the current report, 503 before the first report
 - `POST /api/establishments/{id}/refresh` — scan one establishment in the
   background
 - `GET /api/scan/status` — whether a scan is running
@@ -177,8 +216,13 @@ always comes from an environment variable (`agent.model.api_key_env`).
 
 `ui/` is a SvelteKit app (Svelte 5 + Tailwind CSS) that renders the scan
 report: the visit queue, per-establishment evidence and the pipeline view.
-The dev server proxies `/api` to the Go server (`DOCTOR_URL`, default
-`http://localhost:8090`):
+Every row of the queue links its id (leftmost column) to the detail screen,
+`/detalle?id=<id>`, which shows the whole registry record of the
+establishment (sinatura, address, coordinates, contacts, certifications,
+external ids…) next to its score breakdown, the two closure risks (engine
+and LLM judge) with the judge verdict and the evidence table. The id travels in the query string so the route stays static
+and needs no SPA fallback. The dev server proxies `/api` to the Go server
+(`DOCTOR_URL`, default `http://localhost:8090`):
 
 ```bash
 make serve      # terminal 1: build everything and serve on :8090

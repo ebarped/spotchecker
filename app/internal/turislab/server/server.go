@@ -147,6 +147,24 @@ func (s *Server) Handler() http.Handler {
 			writeJSON(w, http.StatusOK, rep.Queue)
 		})
 
+		// One queue entry in full: registry fields, score breakdown (judge
+		// verdict included) and the primary evidence behind it. The detail
+		// screen of the UI reads this; unknown ids are a 404 so the screen
+		// can tell "not in the dataset" apart from "report not ready".
+		r.Get("/establishments/{id}", func(w http.ResponseWriter, req *http.Request) {
+			rep := s.report.Load()
+			if rep == nil {
+				writeJSON(w, http.StatusServiceUnavailable, map[string]string{"error": "report not ready"})
+				return
+			}
+			item, ok := findQueueItem(rep.Queue, chi.URLParam(req, "id"))
+			if !ok {
+				writeJSON(w, http.StatusNotFound, map[string]string{"error": "establishment not found"})
+				return
+			}
+			writeJSON(w, http.StatusOK, item)
+		})
+
 		r.Post("/establishments/{id}/refresh", func(w http.ResponseWriter, req *http.Request) {
 			if s.scanner == nil {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "scanner not enabled"})
@@ -231,7 +249,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 }
 
 // filterQueue applies the /api/queue query params: tier, category,
-// municipality, q (case-insensitive substring on the name) and the
+// municipality, q (case-insensitive substring on the name or the id) and the
 // limit/offset pagination window. The queue arrives ordered by rank.
 func filterQueue(queue []model.QueueItem, params url.Values) []model.QueueItem {
 	tier := params.Get("tier")
@@ -250,7 +268,9 @@ func filterQueue(queue []model.QueueItem, params url.Values) []model.QueueItem {
 		if municipality != "" && !strings.EqualFold(item.Establishment.Municipality, municipality) {
 			continue
 		}
-		if q != "" && !strings.Contains(strings.ToLower(item.Establishment.Name), q) {
+		if q != "" &&
+			!strings.Contains(strings.ToLower(item.Establishment.Name), q) &&
+			!strings.Contains(strings.ToLower(item.Establishment.ID), q) {
 			continue
 		}
 		filtered = append(filtered, item)
@@ -266,6 +286,18 @@ func filterQueue(queue []model.QueueItem, params url.Values) []model.QueueItem {
 	}
 	end := min(offset+limit, len(filtered))
 	return filtered[offset:end]
+}
+
+// findQueueItem returns the queue entry whose establishment carries id. The
+// queue holds one entry per establishment of the dataset, so a linear scan
+// costs nothing next to encoding the response.
+func findQueueItem(queue []model.QueueItem, id string) (model.QueueItem, bool) {
+	for _, item := range queue {
+		if item.Establishment != nil && item.Establishment.ID == id {
+			return item, true
+		}
+	}
+	return model.QueueItem{}, false
 }
 
 // spaHandler serves the static files of the UI bundle and falls back to

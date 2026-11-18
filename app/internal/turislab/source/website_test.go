@@ -71,8 +71,8 @@ func TestWebsiteCollectOKWithKeyword(t *testing.T) {
 	if status.Kind != model.KindWebStatus || status.Family != model.FamilyActivity {
 		t.Errorf("status signal kind/family = %v/%v", status.Kind, status.Family)
 	}
-	if status.RawValue != "ok" || status.Value != 1.0 {
-		t.Errorf("status raw/value = %q/%v, want ok/1", status.RawValue, status.Value)
+	if status.RawValue != "ok" || status.Value != 0.0 {
+		t.Errorf("status raw/value = %q/%v, want ok/0 (an answering site looks alive)", status.RawValue, status.Value)
 	}
 	if status.DedupeKey == "" {
 		t.Error("status signal must carry a dedupe key")
@@ -140,10 +140,10 @@ func TestWebsiteCollectStatusCodes(t *testing.T) {
 		wantStatus string
 		wantValue  float64
 	}{
-		{"200 ok", 200, "ok", 1.0},
-		{"204 ok", 204, "ok", 1.0},
-		{"404 gone", 404, "404", 0.0},
-		{"500 error", 500, "error", 0.0},
+		{"200 ok", 200, "ok", 0.0},
+		{"204 ok", 204, "ok", 0.0},
+		{"404 gone", 404, "404", 1.0},
+		{"500 error", 500, "error", 0.7},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -183,8 +183,8 @@ func TestWebsiteCollectRefusedConnectionIsDown(t *testing.T) {
 	if len(sigs) != 1 {
 		t.Fatalf("signals = %d, want 1", len(sigs))
 	}
-	if sigs[0].RawValue != "down" || sigs[0].Value != 0.0 {
-		t.Errorf("signal = %q/%v, want down/0", sigs[0].RawValue, sigs[0].Value)
+	if sigs[0].RawValue != "down" || sigs[0].Value != 1.0 {
+		t.Errorf("signal = %q/%v, want down/1", sigs[0].RawValue, sigs[0].Value)
 	}
 	health := src.Health()
 	if health.Healthy {
@@ -252,5 +252,27 @@ func TestWebsiteCollectRespectsContextCancellation(t *testing.T) {
 	}
 	if src.Health().Healthy {
 		t.Error("health must be unhealthy after a canceled request")
+	}
+}
+
+func TestWebsiteCollectTLSFailureIsWeakEvidence(t *testing.T) {
+	// A plain HTTP server behind an https:// URL produces a TLS error — the
+	// same shape a corporate DNS filter or a captive portal gives. That must
+	// stay weak evidence: it cannot fake a closure.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}))
+	defer srv.Close()
+	url := strings.Replace(srv.URL, "http://", "https://", 1)
+
+	src := NewWebsite(WebsiteConfig{})
+	sigs, err := src.Collect(context.Background(), &model.Establishment{ID: "est-1", Website: url})
+	if err != nil {
+		t.Fatalf("Collect must not fail, got %v", err)
+	}
+	if len(sigs) != 1 {
+		t.Fatalf("signals = %d, want 1", len(sigs))
+	}
+	sig := sigs[0]
+	if sig.RawValue != "error" || sig.Value != 0.7 || sig.Confidence != 0.40 {
+		t.Errorf("signal = %q value %v conf %v, want error/0.7/0.40", sig.RawValue, sig.Value, sig.Confidence)
 	}
 }

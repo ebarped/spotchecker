@@ -32,8 +32,33 @@ export interface Establishment {
 	email: string;
 	website: string;
 	registry_id: string;
+	/** Official certifications (Q de calidad, SICTED…); absent when none. */
+	certifications?: string[];
+	last_inspection_at?: string | null;
+	last_inspection_result?: string;
+	google_place_id?: string;
+	tripadvisor_id?: string;
+	yelp_id?: string;
+	osm_id?: string;
 	notes: string;
 	id_generated: boolean;
+}
+
+/** One processed piece of evidence behind a score (model.Evidence). */
+export interface Evidence {
+	signal_id: string;
+	establishment_id: string;
+	family: string;
+	kind: string;
+	source: string;
+	collected_at: string;
+	value: number;
+	confidence: number;
+	weight: number;
+	decay_factor: number;
+	effective_weight: number;
+	label: string;
+	detail: string;
 }
 
 export interface Score {
@@ -50,6 +75,8 @@ export interface Score {
 	reason: string;
 	volatile: boolean;
 	conflict_detected: boolean;
+	/** False when no signal measured the operational state; render the risk as unknown. */
+	risk_known: boolean;
 	/** What the deterministic engine decided; the judge compares against it. */
 	heuristic_status: SuggestedStatus;
 	heuristic_reason: string;
@@ -58,6 +85,9 @@ export interface Score {
 	judge_status?: SuggestedStatus;
 	judge_reason?: string;
 	judge_confidence?: number;
+	/** The judge's own closure risk (0-1); meaningless unless judge_risk_known. */
+	judge_risk?: number;
+	judge_risk_known?: boolean;
 	judge_error?: string;
 }
 
@@ -66,7 +96,7 @@ export interface QueueItem {
 	establishment: Establishment;
 	/** Null while the establishment waits for its first scan. */
 	score: Score | null;
-	primary_signals: unknown[];
+	primary_signals: Evidence[];
 	scan_age_ns: number;
 }
 
@@ -162,7 +192,7 @@ export const STATUS_LABELS: Record<SuggestedStatus, string> = {
 	closure_confirmed: 'Cierre confirmado',
 	closed_temporarily: 'Cierre temporal',
 	seasonal: 'Estacional',
-	unknown: 'Sin datos'
+	unknown: 'No concluyente'
 };
 
 /** Human-readable category labels. */
@@ -175,7 +205,7 @@ export const CATEGORY_LABELS: Record<Category, string> = {
 
 /**
  * Filters the queue by tier, category, municipality and free text on the
- * name, preserving the rank order the backend already applied. The
+ * name or the id, preserving the rank order the backend already applied. The
  * pseudo-tier 'por_procesar' selects the establishments still waiting for
  * their first score.
  */
@@ -193,9 +223,44 @@ export function filterQueue(queue: QueueItem[], filters: QueueFilters): QueueIte
 			item.establishment.municipality.toLowerCase() !== filters.municipality.toLowerCase()
 		)
 			return false;
-		if (q && !item.establishment.name.toLowerCase().includes(q)) return false;
+		if (
+			q &&
+			!item.establishment.name.toLowerCase().includes(q) &&
+			!item.establishment.id.toLowerCase().includes(q)
+		)
+			return false;
 		return true;
 	});
+}
+
+/** The queue entry for an id, or undefined when the report has no such establishment. */
+export function findQueueItem(queue: QueueItem[], id: string): QueueItem | undefined {
+	return queue.find((item) => item.establishment.id === id);
+}
+
+/** Formats a coordinate with the precision the registry exports carry. */
+export function formatCoord(value: number): string {
+	return value.toFixed(6);
+}
+
+/** A query for Google Maps: the coordinates when known, the address otherwise. */
+export function mapsURL(est: Establishment): string {
+	const query =
+		est.lat != null && est.lng != null
+			? `${formatCoord(est.lat)},${formatCoord(est.lng)}`
+			: [est.name, est.address, est.municipality].filter(Boolean).join(', ');
+	return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
+}
+
+/** The same place on OpenStreetMap: centred on the coordinates when known. */
+export function osmURL(est: Establishment): string {
+	if (est.lat != null && est.lng != null) {
+		const lat = formatCoord(est.lat);
+		const lng = formatCoord(est.lng);
+		return `https://www.openstreetmap.org/?mlat=${lat}&mlon=${lng}#map=18/${lat}/${lng}`;
+	}
+	const query = [est.name, est.address, est.municipality].filter(Boolean).join(', ');
+	return `https://www.openstreetmap.org/search?query=${encodeURIComponent(query)}`;
 }
 
 /** Formats a fraction (0–1) as a percentage with no decimals. */
@@ -203,9 +268,27 @@ export function pct(fraction: number): string {
 	return `${Math.round(fraction * 100)}%`;
 }
 
-/** Formats a 0–1 risk as a percentage for display. */
+/** Formats a 0–1 risk as a percentage for display, clamped to 0–100%. */
 export function riskLabel(risk: number): string {
-	return `${Math.round(risk * 100)}%`;
+	const clamped = Math.min(Math.max(risk, 0), 1);
+	return `${Math.round(clamped * 100)}%`;
+}
+
+/**
+ * Closure risk as shown in the UI: an em dash when the score measured no
+ * risk at all, so "we did not look" never reads as "0%".
+ */
+export function riskText(score: Score): string {
+	return score.risk_known ? riskLabel(score.closure_risk) : '—';
+}
+
+/**
+ * The LLM judge's own closure risk, shown beside the engine's. An em dash
+ * when the judge did not report one: a missing risk must not read as "no
+ * risk".
+ */
+export function judgeRiskText(score: Score): string {
+	return score.judge_status && score.judge_risk_known ? riskLabel(score.judge_risk ?? 0) : '—';
 }
 
 /** Humanises the scan age (nanoseconds from the API) as "hace X". */
@@ -290,7 +373,7 @@ export const STATUS_META: Record<SuggestedStatus, StatusMeta> = {
 	closed_temporarily: { label: 'Cierre temporal', color: 'var(--color-empty)' },
 	seasonal: { label: 'Estacional', color: 'var(--color-accent-3)' },
 	active: { label: 'Activo', color: 'var(--color-ok)' },
-	unknown: { label: 'Sin datos', color: 'var(--color-skipped)' }
+	unknown: { label: 'No concluyente', color: 'var(--color-skipped)' }
 };
 
 /** Counts the queue per tier; unscored items count as 'por_procesar'. */
@@ -406,7 +489,7 @@ export function riskBuckets(queue: QueueItem[]): RiskBucket[] {
 		buckets.push({ label: `${from}–${to}%`, count: 0 });
 	}
 	for (const item of queue) {
-		if (!item.score) continue;
+		if (!item.score || !item.score.risk_known) continue;
 		const risk = Math.min(Math.max(item.score.closure_risk, 0), 1);
 		const index = Math.min(Math.floor(risk * (edges.length - 1)), buckets.length - 1);
 		buckets[index].count++;
@@ -430,4 +513,11 @@ export function formatTime(iso: string): string {
 		hour: '2-digit',
 		minute: '2-digit'
 	});
+}
+
+/** Formats a date without the time (inspection dates carry no clock). */
+export function formatDate(iso: string): string {
+	const date = new Date(iso);
+	if (Number.isNaN(date.getTime())) return iso;
+	return date.toLocaleDateString('es-ES', { year: 'numeric', month: 'short', day: 'numeric' });
 }
