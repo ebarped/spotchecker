@@ -256,12 +256,6 @@
 						<dt class="caption">Identificador</dt>
 						<dd class="mono mt-1 text-sm">{est.id}</dd>
 					</div>
-					{#if est.registry_id}
-						<div>
-							<dt class="caption">Sinatura oficial</dt>
-							<dd class="mono mt-1 text-sm">{est.registry_id}</dd>
-						</div>
-					{/if}
 					<div>
 						<dt class="caption">Categoría</dt>
 						<dd class="mt-1 text-sm">
@@ -473,7 +467,9 @@
 						</div>
 					</dl>
 
-					<p class="mt-4 rounded-xl bg-surface-2 p-3 text-xs text-muted">{score.reason}</p>
+					{#if score.judge_reason}
+						<p class="mt-4 rounded-xl bg-surface-2 p-3 text-xs text-muted">{score.judge_reason}</p>
+					{/if}
 
 					<div class="mt-3 flex flex-wrap gap-2 text-[11px]">
 						{#if score.conflict_detected}
@@ -512,9 +508,7 @@
 										</span>
 									{/if}
 								</p>
-								{#if score.judge_reason}
-									<p class="mt-1 text-xs text-muted">{score.judge_reason}</p>
-								{/if}
+
 							{/if}
 							<p class="mt-2 text-[11px] text-faint">
 								Heurística: {STATUS_META[score.heuristic_status].label}
