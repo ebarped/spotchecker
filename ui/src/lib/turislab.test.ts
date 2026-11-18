@@ -4,6 +4,7 @@ import {
 	findQueueItem,
 	formatCoord,
 	formatDate,
+	mapsEmbedURL,
 	mapsURL,
 	osmURL,
 	pct,
@@ -182,6 +183,19 @@ describe('establishment detail helpers', () => {
 		expect(osmURL({ ...oca, lat: null, lng: null })).toContain(
 			'https://www.openstreetmap.org/search?query=LA%20OCA'
 		);
+	});
+
+	it('builds an embeddable Google Maps URL from the coordinates', () => {
+		expect(mapsEmbedURL(oca)).toBe(
+			'https://www.google.com/maps?q=43.005030%2C-7.554310&z=16&hl=es&output=embed'
+		);
+	});
+
+	it('embeds a search by name and address when there are no coordinates', () => {
+		const url = mapsEmbedURL({ ...oca, lat: null, lng: null });
+		expect(url).toContain('https://www.google.com/maps?q=');
+		expect(url).toContain('LA%20OCA');
+		expect(url).toContain('output=embed');
 	});
 
 	it('formats an inspection date without the clock', () => {

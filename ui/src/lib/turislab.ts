@@ -252,6 +252,19 @@ export function mapsURL(est: Establishment): string {
 	return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(query)}`;
 }
 
+/**
+ * The same place as an embeddable map. Google Maps' classic embed endpoint
+ * needs no API key; with coordinates it pins the exact spot, and without them
+ * it falls back to the registry address.
+ */
+export function mapsEmbedURL(est: Establishment): string {
+	const query =
+		est.lat != null && est.lng != null
+			? `${formatCoord(est.lat)},${formatCoord(est.lng)}`
+			: [est.name, est.address, est.municipality].filter(Boolean).join(', ');
+	return `https://www.google.com/maps?q=${encodeURIComponent(query)}&z=16&hl=es&output=embed`;
+}
+
 /** The same place on OpenStreetMap: centred on the coordinates when known. */
 export function osmURL(est: Establishment): string {
 	if (est.lat != null && est.lng != null) {

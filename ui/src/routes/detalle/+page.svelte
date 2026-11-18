@@ -7,6 +7,7 @@
 		formatCoord,
 		formatDate,
 		formatTime,
+		mapsEmbedURL,
 		mapsURL,
 		osmURL,
 		pct,
@@ -518,6 +519,38 @@
 				{/if}
 			</section>
 		</div>
+
+		<!-- Location: the same place the links above point to, embedded -->
+		<section class="glass mt-4 overflow-hidden rounded-2xl">
+			<div class="flex flex-wrap items-baseline justify-between gap-2 px-5 pt-5">
+				<div>
+					<h2 class="text-sm font-semibold">Ubicación</h2>
+					<p class="mt-1 text-xs text-faint">
+						{#if est.lat != null && est.lng != null}
+							Mapa centrado en {formatCoord(est.lat)}, {formatCoord(est.lng)}.
+						{:else}
+							Sin coordenadas en el registro: el mapa busca por nombre y dirección.
+						{/if}
+					</p>
+				</div>
+				<a
+					class="glass glass-hover rounded-full px-3 py-1 text-xs text-muted"
+					href={mapsURL(est)}
+					target="_blank"
+					rel="noreferrer"
+				>
+					Abrir en Google Maps ↗
+				</a>
+			</div>
+			<iframe
+				class="mt-4 h-80 w-full border-0"
+				src={mapsEmbedURL(est)}
+				title={`Mapa de ${est.name}`}
+				loading="lazy"
+				referrerpolicy="no-referrer-when-downgrade"
+				allowfullscreen
+			></iframe>
+		</section>
 
 		<!-- Evidence: only when the report carries it -->
 		{#if evidence.length > 0}

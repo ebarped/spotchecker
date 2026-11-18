@@ -13,10 +13,10 @@
 
 <header class="mb-8 flex flex-wrap items-start justify-between gap-x-6 gap-y-4">
 	<div class="min-w-0">
-		<div class="flex items-center gap-4">
+		<a href="/" class="flex items-center gap-4" title="Ir al inicio">
 			<img src={logo} alt="SpotChecker" class="size-12 shrink-0 drop-shadow-sm sm:size-14" />
 			<h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">SpotChecker</h1>
-		</div>
+		</a>
 		<p class="mt-2 max-w-2xl text-sm text-muted">
 			Cola priorizada de establecimientos con riesgo de cierre o pérdida de calidad. El sistema
 			solo ordena: la decisión de visita es del inspector.
