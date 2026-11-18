@@ -147,6 +147,7 @@ export interface Pipeline {
 export interface QueueFilters {
 	tier?: Tier | '';
 	category?: Category | '';
+	status?: SuggestedStatus | '';
 	municipality?: string;
 	q?: string;
 }
@@ -218,6 +219,9 @@ export function filterQueue(queue: QueueItem[], filters: QueueFilters): QueueIte
 			return false;
 		}
 		if (filters.category && item.establishment.category !== filters.category) return false;
+		if (filters.status) {
+			if (!item.score || item.score.status !== filters.status) return false;
+		}
 		if (
 			filters.municipality &&
 			item.establishment.municipality.toLowerCase() !== filters.municipality.toLowerCase()

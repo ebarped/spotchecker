@@ -6,6 +6,7 @@
 	import Header from '../lib/components/Header.svelte';
 	import MunicipalityChart from '../lib/components/MunicipalityChart.svelte';
 	import RiskHistogram from '../lib/components/RiskHistogram.svelte';
+	import Select from '../lib/components/Select.svelte';
 	import StatCards from '../lib/components/StatCards.svelte';
 	import TierDonut from '../lib/components/TierDonut.svelte';
 	import { toasts } from '../lib/toast.svelte';
@@ -13,6 +14,7 @@
 		CATEGORY_LABELS,
 		filterQueue,
 		STATUS_META,
+		STATUSES,
 		TIERS,
 		TIER_COLORS,
 		TIER_LABELS,
@@ -21,6 +23,7 @@
 		scanAge,
 		scoreChanges,
 		type Category,
+		type SuggestedStatus,
 		type Tier,
 		type TurislabReport
 	} from '../lib/turislab';
@@ -31,6 +34,7 @@
 
 	let tier = $state<Tier | ''>('');
 	let category = $state<Category | ''>('');
+	let status = $state<SuggestedStatus | ''>('');
 	let q = $state('');
 	let busy = $state(false);
 	/** Establishments with a re-scan in flight, waiting for their new score. */
@@ -44,7 +48,7 @@
 			: 'report'
 	);
 
-	const filtered = $derived(report ? filterQueue(report.queue, { tier, category, q }) : []);
+	const filtered = $derived(report ? filterQueue(report.queue, { tier, category, status, q }) : []);
 
 	// The first establishment without a score is the scanner's next target:
 	// the waiting tail is ordered by the upcoming scan order.
@@ -283,28 +287,44 @@
 			<!-- Filters -->
 			<div class="mt-8 mb-4 flex flex-wrap items-center gap-2">
 				<h2 class="mr-2 text-sm font-semibold">Cola de inspección</h2>
-				<input
-					type="search"
-					bind:value={q}
-					placeholder="Buscar por nombre o ID…"
-					class="glass rounded-full px-4 py-1.5 text-sm outline-none placeholder:text-faint"
+				<div class="glass inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-sm">
+					<svg class="size-4 shrink-0 text-muted" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" /></svg>
+					<input
+						type="search"
+						bind:value={q}
+						placeholder="Buscar por nombre o ID…"
+						class="w-48 bg-transparent text-sm outline-none placeholder:text-faint sm:w-64"
+					/>
+				</div>
+				<Select
+					label="Tier"
+					icon="M22 3H2l8 9v7l4 2v-9l8-9z"
+					hideLabel
+					bind:value={tier}
+					options={[{ value: '', label: 'Todos los tiers' }, ...TIERS.map((t) => ({ value: t, label: TIER_LABELS[t], color: TIER_COLORS[t] }))]}
 				/>
-				<select bind:value={tier} class="glass rounded-full px-3 py-1.5 text-sm">
-					<option value="">Todos los tiers</option>
-					{#each TIERS as t (t)}
-						<option value={t}>{TIER_LABELS[t]}</option>
-					{/each}
-				</select>
-				<select bind:value={category} class="glass rounded-full px-3 py-1.5 text-sm">
-					<option value="">Todas las categorías</option>
-					{#each categories as c (c)}
-						<option value={c}>{CATEGORY_LABELS[c]}</option>
-					{/each}
-				</select>
-				<span class="ml-auto text-xs text-faint">
-					{filtered.length} de {report.queue.length} establecimientos ·
-					cobertura {Math.round(report.summary.coverage_pct)}%
-				</span>
+				<Select
+					label="Categoría"
+					icon="M4 6h16M4 12h16M4 18h16"
+					hideLabel
+					bind:value={category}
+					options={[{ value: '', label: 'Todas las categorías' }, ...categories.map((c) => {
+						const icons: Record<string, string> = {
+							restaurant: 'M3 2v7c0 1.1.9 2 2 2h4c1.1 0 2-.9 2-2V2M7 2v20M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3zm0 0v7',
+							hotel: 'M2 4v16M2 8h18a2 2 0 0 1 2 2v10M2 17h20M6 8v-2a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2',
+							bar: 'M8 22h8M12 11v11M19 3H5l7 8 7-8z',
+							other: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM17 17m-3 0a3 3 0 1 0 6 0a3 3 0 1 0-6 0'
+						};
+						return { value: c, label: CATEGORY_LABELS[c], icon: icons[c] };
+					})]}
+				/>
+				<Select
+					label="Estado"
+					icon="M12 22a10 10 0 100-20 10 10 0 000 20z"
+					hideLabel
+					bind:value={status}
+					options={[{ value: '', label: 'Todos los estados' }, ...STATUSES.map((s) => ({ value: s, label: STATUS_META[s].label, color: STATUS_META[s].color }))]}
+				/>
 			</div>
 
 			<!-- Queue -->
@@ -316,8 +336,7 @@
 							<th class="px-4 py-3 font-semibold">Establecimiento</th>
 							<th class="px-4 py-3 font-semibold">Tier</th>
 							<th class="px-4 py-3 font-semibold">Estado</th>
-							<th class="px-4 py-3 font-semibold">Riesgo motor</th>
-							<th class="px-4 py-3 font-semibold">Riesgo juez</th>
+							<th class="px-4 py-3 font-semibold">Riesgo</th>
 							<th class="px-4 py-3 font-semibold">Motivo</th>
 							<th class="px-4 py-3 font-semibold">Scan</th>
 							<th class="px-4 py-3"></th>
@@ -326,10 +345,10 @@
 					<tbody>
 						{#each filtered as item (item.establishment.id)}
 							<tr class="border-b border-line/60 last:border-0">
-								<td class="px-4 py-3">
+								<td class="px-4 py-3 whitespace-nowrap">
 									<a
 										href={`/detalle?id=${encodeURIComponent(item.establishment.id)}`}
-										class="mono text-xs text-accent hover:underline"
+										class="mono text-xs text-accent hover:underline whitespace-nowrap"
 										title={`Ver la ficha de ${item.establishment.name}`}
 									>
 										{item.establishment.id}
@@ -375,9 +394,6 @@
 										<span class="text-xs text-faint">—</span>
 									{/if}
 								</td>
-								<td class="px-4 py-3 font-mono">
-									{item.score ? riskText(item.score) : '—'}
-								</td>
 								<td class="px-4 py-3 font-mono text-muted">
 									{item.score ? judgeRiskText(item.score) : '—'}
 								</td>
@@ -404,16 +420,20 @@
 									<button
 										type="button"
 										onclick={() => void refresh(item.establishment.id, item.establishment.name)}
-										class="glass glass-hover rounded-full px-3 py-1 text-xs"
+										class="glass glass-hover inline-flex items-center gap-1 rounded-full px-3 py-1 text-xs whitespace-nowrap"
 										title="Re-escanear este establecimiento ahora"
 									>
+										<svg class="size-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+											<polyline points="23 4 23 10 17 10" />
+											<path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" />
+										</svg>
 										Re-escanear
 									</button>
 								</td>
 							</tr>
 						{:else}
 							<tr>
-								<td colspan="9" class="px-4 py-8 text-center text-sm text-muted">
+								<td colspan="8" class="px-4 py-8 text-center text-sm text-muted">
 									Ningún establecimiento coincide con los filtros.
 								</td>
 							</tr>
