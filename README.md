@@ -212,6 +212,42 @@ always comes from an environment variable (`agent.model.api_key_env`).
 - `POST /api/agent/chat` — `{session_id?, message}` answered as a
   `text/event-stream` of JSON events
 
+#### Browser MCP: consultar webs y capturar pantallas
+
+`make mcp-browser` levanta [Playwright MCP](https://github.com/microsoft/playwright-mcp)
+en `http://127.0.0.1:8931/mcp` con el Chromium instalado en `/usr/bin/chromium`.
+Configúralo en `agent.mcp` (ver el YAML de ejemplo) y el chat gana
+`browser_navigate` + `browser_snapshot` para leer webs y
+`browser_take_screenshot` para guardar fotos. El prompt del agente le indica
+que guarde cada captura como `<artifacts_dir>/<establishment_id>.png`;
+`artifacts_dir` debe apuntar a la misma carpeta en la que escribe el sidecar
+(`app/artifacts` por defecto, ignorada por git).
+
+`agent.mcp[].tools` es un allowlist opcional de herramientas visibles para el
+modelo (y en `/api/agent/tools`): vacío expone todas. La config local deja solo
+`browser_navigate`, `browser_navigate_back`, `browser_snapshot`,
+`browser_wait_for` y `browser_take_screenshot`, para que el agente no cargue
+esquemas de clics, JavaScript, cookies, grabaciones ni tests. La captura
+automática usa su propio cliente MCP y no depende de esta lista.
+
+Cuando el modelo completa `browser_take_screenshot`, el stream emite un evento
+`{"type":"image","image_url":"..."}` y el chat pega la foto **en línea**, justo
+debajo de la respuesta (clicable para abrirla a tamaño completo). El evento solo
+se envía si el PNG existe, así que una captura fallida no deja una imagen rota.
+
+La imagen se sirve en `GET /api/establishments/{id}/screenshot` y aparece en la
+sección «Website» de `/detalle?id=<id>`, junto a la URL clickable y la fecha del
+fichero. Un `HEAD` a esa ruta comprueba si existe; no hay signals ni cambios en
+la BD.
+
+Con `screenshots.enabled: true` (default), **cada sync** —el botón de
+re-escaneo y el ciclo programado— captura la web conocida (o la descubierta en
+Google Maps) y sobrescribe `<artifacts_dir>/<id>.png`. `screenshots.min_interval`
+permite espaciar las recapturas (`0s` = siempre). `make run` y `make serve`
+arrancan el sidecar (y esperan a que responda) si no está ya escuchando, y lo
+apagan al salir. Los targets aceptan
+`MCP_BROWSER_PORT`, `ARTIFACTS_DIR` y `CHROME` como variables de entorno.
+
 ### Web UI
 
 `ui/` is a SvelteKit app (Svelte 5 + Tailwind CSS) that renders the scan

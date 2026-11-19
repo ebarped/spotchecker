@@ -241,11 +241,14 @@ func (s *Score) AssignTier(cfg TierConfig) {
 // ─── Queue ────────────────────────────────────────────────────────────────────
 
 type QueueItem struct {
-	Rank           int            `json:"rank"`
-	Establishment  *Establishment `json:"establishment"`
-	Score          *Score         `json:"score"`
-	PrimarySignals []Evidence     `json:"primary_signals"`
-	ScanAge        time.Duration  `json:"scan_age_ns"`
+	Rank          int            `json:"rank"`
+	Establishment *Establishment `json:"establishment"`
+	// WebsiteURL is the site the scanner captures: the registry's own, or the
+	// one Google Maps discovered when the registry has none.
+	WebsiteURL     string        `json:"website_url,omitempty"`
+	Score          *Score        `json:"score"`
+	PrimarySignals []Evidence    `json:"primary_signals"`
+	ScanAge        time.Duration `json:"scan_age_ns"`
 }
 
 // ─── Report ───────────────────────────────────────────────────────────────────

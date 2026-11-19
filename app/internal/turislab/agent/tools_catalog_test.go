@@ -62,16 +62,21 @@ func TestToolsCatalogBuiltin(t *testing.T) {
 }
 
 // externalMCPFixture serves a minimal MCP server over streamable HTTP with
-// one tool, the way an external MCP server does.
-func externalMCPFixture(t *testing.T) *httptest.Server {
+// the given tool names, the way an external MCP server does.
+func externalMCPFixture(t *testing.T, names ...string) *httptest.Server {
 	t.Helper()
+	if len(names) == 0 {
+		names = []string{"echo"}
+	}
 	server := mcpgo.NewServer(&mcpgo.Implementation{Name: "test-mcp", Version: "0"}, nil)
-	mcpgo.AddTool(server, &mcpgo.Tool{Name: "echo", Description: "Echoes whatever it is given"},
-		func(ctx context.Context, req *mcpgo.CallToolRequest, input struct{}) (*mcpgo.CallToolResult, struct{}, error) {
-			return &mcpgo.CallToolResult{Content: []mcpgo.Content{
-				&mcpgo.TextContent{Text: "echo"},
-			}}, struct{}{}, nil
-		})
+	for _, name := range names {
+		mcpgo.AddTool(server, &mcpgo.Tool{Name: name, Description: "Echoes whatever it is given"},
+			func(ctx context.Context, req *mcpgo.CallToolRequest, input struct{}) (*mcpgo.CallToolResult, struct{}, error) {
+				return &mcpgo.CallToolResult{Content: []mcpgo.Content{
+					&mcpgo.TextContent{Text: "echo"},
+				}}, struct{}{}, nil
+			})
+	}
 	return httptest.NewServer(mcpgo.NewStreamableHTTPHandler(
 		func(r *http.Request) *mcpgo.Server { return server }, nil))
 }
@@ -99,6 +104,34 @@ func TestToolsCatalogExternal(t *testing.T) {
 	}
 	if len(catalog.Builtin) == 0 || catalog.Builtin[0].Key != "report" {
 		t.Errorf("builtin sources = %+v", catalog.Builtin)
+	}
+}
+
+// The sidebar only lists the tools the model is allowed to call.
+func TestToolsCatalogRespectsMCPAllowlist(t *testing.T) {
+	fake := externalMCPFixture(t, "browser_navigate", "browser_evaluate")
+	defer fake.Close()
+
+	cfg := catalogConfig(MCPServer{
+		Name:  "browser",
+		URL:   fake.URL,
+		Tools: []string{"browser_navigate"},
+	})
+	svc, err := New(cfg, logx.New(io.Discard))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	catalog := svc.Tools(context.Background())
+	if len(catalog.External) != 1 {
+		t.Fatalf("got %d external sources, want 1", len(catalog.External))
+	}
+	names := make([]string, 0, len(catalog.External[0].Tools))
+	for _, info := range catalog.External[0].Tools {
+		names = append(names, info.Name)
+	}
+	if len(names) != 1 || names[0] != "browser_navigate" {
+		t.Errorf("catalog tools = %v, want [browser_navigate]", names)
 	}
 }
 

@@ -26,6 +26,12 @@
 	const id = $derived(page.url.searchParams.get('id') ?? '');
 
 	let item = $state<QueueItem | null>(null);
+	/** Website capture saved by the browser MCP, if one exists for this id. */
+	let screenshot = $state<{
+		url: string;
+		capturedAt: string | null;
+		lastModified: string | null;
+	} | null>(null);
 	let phase = $state<'loading' | 'ready' | 'missing' | 'error'>('loading');
 	let errorMessage = $state('');
 	let pending = $state(false);
@@ -48,9 +54,43 @@
 	const judgeRiskColor = $derived(
 		score && score.judge_status ? STATUS_META[score.judge_status].color : 'var(--color-faint)'
 	);
+	/** The clickable website, normalised to an absolute http(s) URL. */
+	const websiteURL = $derived.by(() => {
+		const raw = (item?.website_url || est?.website)?.trim();
+		if (!raw) return null;
+		try {
+			const url = new URL(raw.includes('://') ? raw : `https://${raw}`);
+			return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : null;
+		} catch {
+			return null;
+		}
+	});
 
 	function dash(value: string | null | undefined): string {
 		return value && value.trim() !== '' ? value : '—';
+	}
+
+	/** The screenshot is a runtime file, so it is not part of the QueueItem. */
+	async function checkScreenshot(establishmentID: string) {
+		const endpoint = `/api/establishments/${encodeURIComponent(establishmentID)}/screenshot`;
+		try {
+			const res = await fetch(endpoint, { method: 'HEAD', cache: 'no-store' });
+			if (!res.ok || id !== establishmentID) {
+				screenshot = null;
+				return;
+			}
+			const lastModified = res.headers.get('Last-Modified');
+			// The page polls every 5s: only swap the image when the file changed,
+			// otherwise the same photo would reload on every poll.
+			if (screenshot && screenshot.lastModified === lastModified) return;
+			screenshot = {
+				url: `${endpoint}?t=${Date.now()}`,
+				capturedAt: lastModified,
+				lastModified
+			};
+		} catch {
+			screenshot = null;
+		}
 	}
 
 	async function load(establishmentID: string, attempt = 0) {
@@ -81,6 +121,7 @@
 			}
 			item = next;
 			phase = 'ready';
+			void checkScreenshot(establishmentID);
 		} catch (err) {
 			errorMessage = err instanceof Error ? err.message : String(err);
 			phase = 'error';
@@ -120,6 +161,7 @@
 		const current = id;
 		if (!current) {
 			item = null;
+			screenshot = null;
 			phase = 'missing';
 			return;
 		}
@@ -303,10 +345,10 @@
 					<div>
 						<dt class="caption">Web</dt>
 						<dd class="mt-1 truncate text-sm">
-							{#if est.website}
+							{#if websiteURL}
 								<a
 									class="text-accent hover:underline"
-									href={est.website}
+									href={websiteURL}
 									target="_blank"
 									rel="noreferrer">{est.website}</a
 								>
@@ -522,6 +564,51 @@
 				{/if}
 			</section>
 		</div>
+
+		<!-- Website: the live URL plus the capture made on every sync -->
+		<section class="glass mt-4 rounded-2xl p-5">
+			<div class="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-2">
+				<h2 class="text-sm font-semibold">Website</h2>
+				{#if screenshot?.capturedAt}
+					<span class="text-[11px] text-faint">
+						Capturada el {formatDate(screenshot.capturedAt)}
+					</span>
+				{/if}
+			</div>
+
+			<div class="mt-2 flex flex-wrap items-center gap-2 text-sm">
+				{#if websiteURL}
+					<a
+						class="text-accent hover:underline"
+						href={websiteURL}
+						target="_blank"
+						rel="noreferrer">{websiteURL} ↗</a
+					>
+					{#if item?.website_url && item.website_url !== est.website}
+						<span class="rounded-full bg-surface-2 px-2.5 py-0.5 text-[11px] text-faint">
+							descubierta por Google Maps
+						</span>
+					{/if}
+				{:else}
+					<p class="text-muted">Sin URL conocida.</p>
+				{/if}
+			</div>
+
+			{#if screenshot}
+				<div class="mt-4 overflow-hidden rounded-xl border border-line bg-surface-2/40">
+					<img
+						class="mx-auto w-full object-contain"
+						src={screenshot.url}
+						alt={`Captura de la web de ${est.name}`}
+						loading="lazy"
+					/>
+				</div>
+			{:else}
+				<p class="mt-3 text-xs text-faint">
+					Sin captura todavía: se guarda automáticamente en el próximo sync.
+				</p>
+			{/if}
+		</section>
 
 		<!-- Evidence: only when the report carries it -->
 		{#if evidence.length > 0}

@@ -23,6 +23,7 @@ import (
 
 	"github.com/datadope/turislab-doctor/internal/logx"
 	"github.com/datadope/turislab-doctor/internal/turislab/agent"
+	"github.com/datadope/turislab-doctor/internal/turislab/capture"
 	"github.com/datadope/turislab-doctor/internal/turislab/config"
 	"github.com/datadope/turislab-doctor/internal/turislab/judge"
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
@@ -130,6 +131,18 @@ func main() {
 	if judgeSvc != nil {
 		scanOpts = append(scanOpts, scan.WithJudge(judgeSvc))
 	}
+	if cfg.Screenshots.Enabled {
+		scanOpts = append(scanOpts, scan.WithScreenshoter(capture.New(capture.Config{
+			MCPURL:       cfg.Screenshots.MCPURL,
+			ArtifactsDir: cfg.ArtifactsDir,
+			Timeout:      time.Duration(cfg.Screenshots.TimeoutSeconds) * time.Second,
+			MinInterval:  cfg.Screenshots.MinInterval.Duration,
+		})))
+		log.Info("capture", "capturas automáticas en cada scan → %s (MCP %s)",
+			cfg.ArtifactsDir, cfg.Screenshots.MCPURL)
+	} else {
+		log.Info("capture", "capturas automáticas desactivadas")
+	}
 
 	scanCfg := scan.ScanConfig{
 		TriggerInterval:      cfg.Scan.TriggerInterval.Duration,
@@ -189,9 +202,9 @@ func main() {
 	// The inspection assistant is mounted only when the configuration
 	// enables it; without it the UI hides the agent tab.
 	var agentSvc *agent.Service
-	opts := []server.Option{server.WithScanner(scanner)}
+	opts := []server.Option{server.WithScanner(scanner), server.WithArtifactsDir(cfg.ArtifactsDir)}
 	if cfg.Agent.Enabled {
-		agentSvc, err = agent.New(agentConfig(cfg.Agent), log)
+		agentSvc, err = agent.New(agentConfig(cfg.Agent, cfg.ArtifactsDir), log)
 		if err != nil {
 			log.Error("agent", "%v", err)
 			os.Exit(1)
@@ -377,10 +390,15 @@ func buildJudge(cfg config.Config, log *logx.Logger) (*judge.Judge, error) {
 // refreshLoop rebuilds the in-memory report every 10 seconds from the store.
 // agentConfig maps the YAML agent section onto the agent package's own
 // configuration type, so the package stays decoupled from config.
-func agentConfig(cfg config.AgentConfig) agent.Config {
+func agentConfig(cfg config.AgentConfig, artifactsDir string) agent.Config {
 	mcp := make([]agent.MCPServer, 0, len(cfg.MCP))
 	for _, server := range cfg.MCP {
-		mcp = append(mcp, agent.MCPServer{Name: server.Name, URL: server.URL, Headers: server.Headers})
+		mcp = append(mcp, agent.MCPServer{
+			Name:    server.Name,
+			URL:     server.URL,
+			Headers: server.Headers,
+			Tools:   server.Tools,
+		})
 	}
 	return agent.Config{
 		MaxTurns: cfg.MaxTurns,
@@ -390,8 +408,9 @@ func agentConfig(cfg config.AgentConfig) agent.Config {
 			BaseURL:   cfg.Model.BaseURL,
 			APIKeyEnv: cfg.Model.APIKeyEnv,
 		},
-		MCP:         mcp,
-		Suggestions: cfg.Suggestions,
+		MCP:          mcp,
+		ArtifactsDir: artifactsDir,
+		Suggestions:  cfg.Suggestions,
 	}
 }
 
@@ -459,6 +478,27 @@ func waitingOrder(ests []*model.Establishment, byID map[string]*model.Score, cur
 	return waiting
 }
 
+// capturedWebsite is the URL the scanner uses for the screenshot: the
+// registry's own website, or the newest one Google Maps discovered. Keeping it
+// in the report lets the detail screen link the photo it is actually showing.
+func capturedWebsite(est *model.Establishment, signals []*model.Signal) string {
+	if est == nil {
+		return ""
+	}
+	if est.Website != "" {
+		return est.Website
+	}
+	site := ""
+	var newest time.Time
+	for _, sig := range signals {
+		if sig.EstablishmentID == est.ID && sig.Kind == model.KindWebsiteFound &&
+			sig.RawValue != "" && sig.CollectedAt.After(newest) {
+			site, newest = sig.RawValue, sig.CollectedAt
+		}
+	}
+	return site
+}
+
 func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.SignalSource, scanner *scan.Scanner, staleAfterDays int) *model.Report {
 	ests, err := db.ListEstablishments(ctx)
 	if err != nil {
@@ -481,6 +521,12 @@ func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.Signa
 		signals = nil
 	}
 	evidenceByID := reportEvidence(signals, since, scoring.DefaultScoringConfig().DecayHalfLifeDays)
+	websiteByID := make(map[string]string, len(ests))
+	for _, e := range ests {
+		if site := capturedWebsite(e, signals); site != "" {
+			websiteByID[e.ID] = site
+		}
+	}
 
 	byID := make(map[string]*model.Score, len(scores))
 	for _, sc := range scores {
@@ -518,6 +564,7 @@ func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.Signa
 		item := model.QueueItem{
 			Rank:           rank,
 			Establishment:  p.est,
+			WebsiteURL:     websiteByID[p.est.ID],
 			Score:          p.sc,
 			PrimarySignals: evidenceByID[p.est.ID],
 			ScanAge:        now.Sub(p.sc.ComputedAt),
@@ -547,7 +594,11 @@ func buildReport(ctx context.Context, db *store.SQLiteStore, srcs []source.Signa
 	}
 	for _, e := range waitingOrder(ests, byID, cursor) {
 		rank++
-		queue = append(queue, model.QueueItem{Rank: rank, Establishment: e})
+		queue = append(queue, model.QueueItem{
+			Rank:          rank,
+			Establishment: e,
+			WebsiteURL:    websiteByID[e.ID],
+		})
 	}
 	if summary.Total > 0 {
 		summary.Coverage = float64(covered) / float64(summary.Total) * 100

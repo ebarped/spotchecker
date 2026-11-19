@@ -4,12 +4,18 @@ APP     ?= app
 UI      ?= ui
 CONFIG  ?= app/config.turislab.yaml
 PORT    ?= 8090
+MCP_BROWSER_PORT ?= 8931
+ARTIFACTS_DIR ?= $(APP)/artifacts
+CHROME  ?= /usr/bin/chromium
+MCP_BROWSER_FLAGS = --port $(MCP_BROWSER_PORT) --host 127.0.0.1 --headless \
+	--executable-path $(CHROME) --viewport-size 1365x768 \
+	--image-responses omit --ignore-roots --idle-timeout 0
 TL_SCRAPER_VERSION ?= v1.18.1
 TL_SCRAPER_BIN ?= bin/google-maps-scraper
 
 .DEFAULT_GOAL := help
 .PHONY: help all build test vet fmt lint run scan-once validate serve tidy clean datasets \
-	ui-install ui-dev ui-check ui-build ui-build-if-needed turislab-scraper
+	ui-install ui-dev ui-check ui-build ui-build-if-needed turislab-scraper mcp-browser
 
 help: ## Show the available targets
 	@echo "usage: make [target]"
@@ -38,7 +44,27 @@ lint: fmt vet test ## Everything CI checks, no extra tooling
 tidy: ## Sync go.mod / go.sum
 	$(GO) -C $(APP) mod tidy
 
-run: build ## Run the scanner + API + UI on :$(PORT)
+# Run everything with one command: the browser MCP sidecar is started in the
+# background (unless one is already listening) so automatic captures work by
+# default, and is stopped when the app exits.
+run: build ## Run browser MCP + scanner + API + UI on :$(PORT)
+	@code=$$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$(MCP_BROWSER_PORT)/mcp || true); \
+	if [ "$$code" = "000" ]; then \
+		mkdir -p $(ARTIFACTS_DIR); \
+		(cd $(ARTIFACTS_DIR) && exec npx -y @playwright/mcp@latest $(MCP_BROWSER_FLAGS) > mcp-browser.log 2>&1) & \
+		browser_pid=$$!; \
+		trap 'kill $$browser_pid 2>/dev/null || true' EXIT INT TERM; \
+		echo "browser MCP started on :$(MCP_BROWSER_PORT) (pid $$browser_pid)"; \
+		ready=no; \
+		for i in $$(seq 1 30); do \
+			probe=$$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:$(MCP_BROWSER_PORT)/mcp || true); \
+			if [ "$$probe" != "000" ]; then ready=yes; break; fi; \
+			sleep 1; \
+		done; \
+		if [ "$$ready" = "no" ]; then echo "browser MCP no respondió en :$(MCP_BROWSER_PORT): las capturas fallarán" >&2; fi; \
+	else \
+		echo "reusing browser MCP on :$(MCP_BROWSER_PORT)"; \
+	fi; \
 	./$(BIN) --config $(CONFIG) --addr :$(PORT)
 
 scan-once: build ## Scan every establishment once and exit
@@ -73,8 +99,16 @@ turislab-scraper: ## Download the gosom Google Maps scraper into bin/
 	chmod +x "$(TL_SCRAPER_BIN)"; \
 	echo "installed $(TL_SCRAPER_BIN)"
 
-serve: clean build ## Clean, rebuild everything (UI included) and serve on :$(PORT)
-	./$(BIN) --config $(CONFIG) --addr :$(PORT)
+# Playwright MCP sidecar: the agent drives this browser to read websites and
+# save screenshots. Run it in another terminal before asking the chat for a
+# capture. --image-responses omit keeps PNGs out of the chat history; the
+# explicit filename passed by the agent resolves against this working dir.
+mcp-browser: ## Start the browser MCP on :$(MCP_BROWSER_PORT) (captures in $(ARTIFACTS_DIR))
+	@mkdir -p $(ARTIFACTS_DIR)
+	cd $(ARTIFACTS_DIR) && npx -y @playwright/mcp@latest $(MCP_BROWSER_FLAGS)
+
+serve: clean ## Clean, rebuild everything (UI included) and serve on :$(PORT)
+	@$(MAKE) run
 
 clean: ## Remove the binary, the embedded UI build and the local database
 	rm -f $(BIN)

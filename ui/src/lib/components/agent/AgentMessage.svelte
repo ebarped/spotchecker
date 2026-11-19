@@ -85,6 +85,26 @@
 					<span class="text-xs text-muted">Agent is working…</span>
 				</div>
 			{/if}
+			{#if message.images?.length}
+				<div class="space-y-2">
+					{#each message.images as src, i (i)}
+						<a
+							class="block overflow-hidden rounded-2xl rounded-tl-md border border-line bg-surface-2/60"
+							href={src}
+							target="_blank"
+							rel="noreferrer"
+							title="Abrir captura a tamaño completo"
+						>
+							<img
+								class="max-h-80 w-full object-contain"
+								{src}
+								alt={`Captura de la web ${i + 1} de esta respuesta`}
+								loading="lazy"
+							/>
+						</a>
+					{/each}
+				</div>
+			{/if}
 			{#if message.error}
 				{#if message.text !== ''}
 					<p class="text-xs text-error">

@@ -221,6 +221,20 @@ server:
   cors_origins: []                # [] = same-origin. Opciones: lista de orígenes, p. ej. ["https://app.example.org"]. [Prod] restringir.
   static_dir: ""                  # "" = UI embebida. Opciones: "" o ruta a un build externo.
 
+# Ficheros generados por las tools del chat (capturas de webs). La ruta relativa
+# se resuelve contra el directorio de este fichero; debe ser la misma carpeta
+# en la que el sidecar `make mcp-browser` escribe las capturas.
+artifacts_dir: ./app/artifacts
+
+# Captura automática de la web en CADA scan (botón «Re-escanear ahora» y ciclo
+# programado). Usa el MCP de Playwright; si el navegador falla, el scan sigue y
+# el score no cambia. min_interval: 0 = recaptura siempre; p. ej. 1h para ahorrar.
+screenshots:
+  enabled: true                   # [PoC] true. Opciones: true | false.
+  mcp_url: http://127.0.0.1:8931/mcp  # El que levanta `make mcp-browser` / `make run`.
+  min_interval: 0s                # Opciones: "0s" (siempre) o "30m", "1h", "24h".
+  timeout_seconds: 60             # Límite por captura. Opciones: 10-300.
+
 # -----------------------------------------------------------------------------
 # Agente conversacional
 # -----------------------------------------------------------------------------
@@ -233,6 +247,20 @@ agent:
     name: "openrouter/z-ai/glm-5.3-flash"  # Modelo del proveedor. Opciones: el nombre exacto que acepte el endpoint.
     base_url: "https://litellm.doi.azure.datadope.co/v1"  # "" = API oficial. Opciones: "" o endpoint compatible OpenAI, p. ej. un gateway LiteLLM.
     api_key_env: LITELLM_API_KEY  # NOMBRE de la env var con la clave. Opciones: cualquier nombre válido; nunca la clave literal.
+  # MCPs externos (HTTP streamable). `make mcp-browser` levanta Playwright MCP
+  # en :8931 con Chromium; el agente gana browser_navigate/browser_snapshot
+  # (leer webs) y browser_take_screenshot (foto en artifacts_dir).
+  mcp:
+    - name: browser
+      url: http://127.0.0.1:8931/mcp
+      # Opcional: allowlist de herramientas visibles para el modelo (y en
+      # /api/agent/tools). Vacío = todas. Para un agente de solo lectura:
+      tools:
+        - browser_navigate
+        - browser_navigate_back
+        - browser_snapshot
+        - browser_wait_for
+        - browser_take_screenshot
   suggestions: []                 # [] = prompts por defecto. Opciones: lista de cadenas.
 
 # -----------------------------------------------------------------------------

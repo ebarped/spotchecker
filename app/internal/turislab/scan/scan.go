@@ -38,6 +38,13 @@ type Judge interface {
 	Review(ctx context.Context, est *model.Establishment, signals []*model.Signal, score *model.Score) (*judge.Verdict, error)
 }
 
+// Screenshoter saves a photo of an establishment's website. The capture
+// package implements it with the browser MCP. It produces no signals: the
+// photo is evidence for the inspector, not an input to the scoring engine.
+type Screenshoter interface {
+	Capture(ctx context.Context, establishmentID, websiteURL string) (file string, err error)
+}
+
 type ScanConfig struct {
 	TriggerInterval      time.Duration
 	TargetsPerTick       int
@@ -62,12 +69,13 @@ type ScanStatus struct {
 }
 
 type Scanner struct {
-	cfg     ScanConfig
-	store   Store
-	sources []Source
-	scoring *scoring.Engine
-	judge   Judge
-	log     *logx.Logger
+	cfg          ScanConfig
+	store        Store
+	sources      []Source
+	scoring      *scoring.Engine
+	judge        Judge
+	screenshoter Screenshoter
+	log          *logx.Logger
 
 	running  atomic.Bool
 	lastErr  atomic.Pointer[string]
@@ -84,6 +92,11 @@ type Option func(*Scanner)
 // verdict. Without it the engine's verdict is the final one.
 func WithJudge(j Judge) Option {
 	return func(s *Scanner) { s.judge = j }
+}
+
+// WithScreenshoter captures the establishment's website on every scan.
+func WithScreenshoter(c Screenshoter) Option {
+	return func(s *Scanner) { s.screenshoter = c }
 }
 
 func New(cfg ScanConfig, store Store, sources []Source, eng *scoring.Engine, log *logx.Logger, opts ...Option) *Scanner {
@@ -251,6 +264,30 @@ func (s *Scanner) ScanOne(ctx context.Context, establishmentID string) error {
 	// for lack of a site, and fold its signals in.
 	if target.Website == "" {
 		allSignals = append(allSignals, s.checkDiscoveredWebsite(ctx, target, enabled, allSignals)...)
+	}
+
+	// Capture after the sources (and the discovered-website fallback) have
+	// run, so the photo uses the URL the scan actually found. A browser
+	// failure is reported but never fails the scan or changes its score.
+	if s.screenshoter != nil {
+		site := target.Website
+		if site == "" {
+			for _, sig := range allSignals {
+				if sig.Kind == model.KindWebsiteFound && sig.RawValue != "" {
+					site = sig.RawValue
+					break
+				}
+			}
+		}
+		if site == "" {
+			s.log.Info("scan", "[%s] sin web conocida: no hay captura", target.ID)
+		} else if file, err := s.screenshoter.Capture(ctx, target.ID, site); err != nil {
+			s.log.Warn("capture", "[%s] captura de la web falló: %v", target.ID, err)
+		} else if file != "" {
+			s.log.Info("scan", "[%s] captura guardada en %s", target.ID, file)
+		} else {
+			s.log.Info("scan", "[%s] captura omitida por el intervalo mínimo", target.ID)
+		}
 	}
 
 	for _, sig := range allSignals {

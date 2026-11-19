@@ -3,11 +3,31 @@ package main
 import (
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/datadope/turislab-doctor/internal/turislab/config"
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
 	"github.com/datadope/turislab-doctor/internal/turislab/scoring"
 )
+
+func TestCapturedWebsitePrefersRegistryThenNewestDiscovery(t *testing.T) {
+	est := &model.Establishment{ID: "R-LU-000710"}
+	signals := []*model.Signal{
+		{EstablishmentID: "R-LU-000710", Kind: model.KindWebsiteFound,
+			RawValue: "https://old.example", CollectedAt: time.Now().Add(-time.Hour)},
+		{EstablishmentID: "R-LU-000710", Kind: model.KindWebsiteFound,
+			RawValue: "https://new.example", CollectedAt: time.Now()},
+		{EstablishmentID: "other", Kind: model.KindWebsiteFound,
+			RawValue: "https://other.example", CollectedAt: time.Now()},
+	}
+	if got := capturedWebsite(est, signals); got != "https://new.example" {
+		t.Errorf("discovered website = %q, want the newest one", got)
+	}
+	est.Website = "https://registro.example"
+	if got := capturedWebsite(est, signals); got != "https://registro.example" {
+		t.Errorf("website = %q, want the registry one", got)
+	}
+}
 
 func TestScoringConfigDefaultsWhenEmpty(t *testing.T) {
 	sc := scoringConfig(config.Config{})

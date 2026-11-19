@@ -56,6 +56,29 @@ legal:
 	}
 }
 
+func TestScreenshotsEnabledByDefaultAndArtifactsDirResolved(t *testing.T) {
+	dir := t.TempDir()
+	cfg, err := Load(writeConfig(t, dir, "legal:\n  scraping_ack: true\n"))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Screenshots.Enabled {
+		t.Error("screenshots.enabled should default to true")
+	}
+	if got, want := cfg.Screenshots.MCPURL, "http://127.0.0.1:8931/mcp"; got != want {
+		t.Errorf("mcp_url = %q, want %q", got, want)
+	}
+	if cfg.Screenshots.TimeoutSeconds != 60 {
+		t.Errorf("timeout_seconds = %d, want 60", cfg.Screenshots.TimeoutSeconds)
+	}
+	if got, want := cfg.ArtifactsDir, filepath.Join(dir, "artifacts"); got != want {
+		t.Errorf("artifacts_dir = %q, want %q", got, want)
+	}
+	if !filepath.IsAbs(cfg.ArtifactsDir) {
+		t.Errorf("artifacts_dir = %q, want an absolute path (the browser MCP has another cwd)", cfg.ArtifactsDir)
+	}
+}
+
 func TestLoadLeavesBareBinaryNameForPathLookup(t *testing.T) {
 	dir := t.TempDir()
 	path := writeConfig(t, dir, `

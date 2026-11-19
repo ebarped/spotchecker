@@ -44,11 +44,15 @@ type Config struct {
 	Scoring  ScoringConfig  `yaml:"scoring"`
 	Tiers    TierConfig     `yaml:"tiers"`
 	Server   ServerConfig   `yaml:"server"`
-	Agent    AgentConfig    `yaml:"agent"`
-	Judge    JudgeConfig    `yaml:"judge"`
-	Metrics  MetricsConfig  `yaml:"metrics"`
-	Logging  LoggingConfig  `yaml:"logging"`
-	Legal    LegalConfig    `yaml:"legal"`
+	// ArtifactsDir holds files produced during chat turns (currently website
+	// screenshots). Paths starting with "." resolve against this file's dir.
+	ArtifactsDir string           `yaml:"artifacts_dir"`
+	Screenshots  ScreenshotConfig `yaml:"screenshots"`
+	Agent        AgentConfig      `yaml:"agent"`
+	Judge        JudgeConfig      `yaml:"judge"`
+	Metrics      MetricsConfig    `yaml:"metrics"`
+	Logging      LoggingConfig    `yaml:"logging"`
+	Legal        LegalConfig      `yaml:"legal"`
 }
 
 type DatabaseConfig struct {
@@ -254,6 +258,15 @@ type ServerConfig struct {
 	StaticDir    string   `yaml:"static_dir"`
 }
 
+// ScreenshotConfig drives the automatic website capture on every scan. It
+// uses the Playwright MCP sidecar; artifacts_dir says where the PNGs land.
+type ScreenshotConfig struct {
+	Enabled        bool     `yaml:"enabled"`
+	MCPURL         string   `yaml:"mcp_url"`
+	MinInterval    Duration `yaml:"min_interval"`
+	TimeoutSeconds int      `yaml:"timeout_seconds"`
+}
+
 type AgentConfig struct {
 	Enabled     bool              `yaml:"enabled"`
 	ReadOnly    bool              `yaml:"read_only"`
@@ -290,6 +303,8 @@ type MCPServerConfig struct {
 	Name    string            `yaml:"name"`
 	URL     string            `yaml:"url"`
 	Headers map[string]string `yaml:"headers"`
+	// Tools is an optional allowlist; empty exposes every advertised tool.
+	Tools []string `yaml:"tools"`
 }
 
 type MetricsConfig struct {
@@ -379,6 +394,12 @@ func Default() Config {
 			WriteTimeout: Duration{30 * time.Second},
 			IdleTimeout:  Duration{60 * time.Second},
 		},
+		ArtifactsDir: "./artifacts",
+		Screenshots: ScreenshotConfig{
+			Enabled:        true,
+			MCPURL:         "http://127.0.0.1:8931/mcp",
+			TimeoutSeconds: 60,
+		},
 		Metrics: MetricsConfig{
 			Enabled: true,
 			Path:    "/metrics",
@@ -438,6 +459,14 @@ func (c *Config) resolvePaths(baseDir string) {
 	c.Sources.GoogleMapsScraper.Binary = resolve(c.Sources.GoogleMapsScraper.Binary)
 	c.Sources.Overture.LocalPath = resolve(c.Sources.Overture.LocalPath)
 	c.Server.StaticDir = resolve(c.Server.StaticDir)
+	c.ArtifactsDir = resolve(c.ArtifactsDir)
+	// The browser MCP sidecar has a different working directory and the chat
+	// prompt embeds this path in a tool argument, so it must be absolute.
+	if c.ArtifactsDir != "" && !filepath.IsAbs(c.ArtifactsDir) {
+		if abs, err := filepath.Abs(c.ArtifactsDir); err == nil {
+			c.ArtifactsDir = abs
+		}
+	}
 }
 
 func (c *Config) validate() error {

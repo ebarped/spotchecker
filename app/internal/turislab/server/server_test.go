@@ -1,11 +1,14 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -490,5 +493,60 @@ func TestAgentDisabledByDefault(t *testing.T) {
 
 	if rec := get(t, srv, "/api/agent/info"); rec.Code != http.StatusNotFound {
 		t.Errorf("GET /api/agent/info without the agent: status %d, want 404", rec.Code)
+	}
+}
+
+func TestScreenshotEndpoint(t *testing.T) {
+	dir := t.TempDir()
+	png := []byte("\x89PNG\r\n\x1a\nfake capture")
+	if err := os.WriteFile(filepath.Join(dir, "R-LU-000710.png"), png, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	srv := newTestServer(t, WithArtifactsDir(dir))
+
+	rec := get(t, srv, "/api/establishments/R-LU-000710/screenshot")
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET screenshot status = %d, want 200", rec.Code)
+	}
+	if got := rec.Header().Get("Content-Type"); got != "image/png" {
+		t.Errorf("content-type = %q, want image/png", got)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("cache-control = %q, want no-store", got)
+	}
+	if !bytes.Equal(rec.Body.Bytes(), png) {
+		t.Errorf("screenshot body = %q, want %q", rec.Body.Bytes(), png)
+	}
+
+	// The UI probes with HEAD and uses Last-Modified as the capture date.
+	head := httptest.NewRecorder()
+	srv.Handler().ServeHTTP(head, httptest.NewRequest(http.MethodHead,
+		"/api/establishments/R-LU-000710/screenshot", nil))
+	if head.Code != http.StatusOK {
+		t.Errorf("HEAD screenshot status = %d, want 200", head.Code)
+	}
+	if head.Header().Get("Last-Modified") == "" {
+		t.Error("HEAD screenshot has no Last-Modified header")
+	}
+	if head.Body.Len() != 0 {
+		t.Errorf("HEAD screenshot returned a body of %d bytes", head.Body.Len())
+	}
+
+	for _, tc := range []struct {
+		path string
+		want int
+	}{
+		{"/api/establishments/does-not-exist/screenshot", http.StatusNotFound},
+		{"/api/establishments/bad%20id/screenshot", http.StatusBadRequest},
+		{"/api/establishments/..%2Fsecret/screenshot", http.StatusBadRequest},
+	} {
+		if got := get(t, srv, tc.path).Code; got != tc.want {
+			t.Errorf("GET %s status = %d, want %d", tc.path, got, tc.want)
+		}
+	}
+
+	withoutDir := newTestServer(t)
+	if rec := get(t, withoutDir, "/api/establishments/R-LU-000710/screenshot"); rec.Code != http.StatusNotFound {
+		t.Errorf("screenshot without artifacts dir: status %d, want 404", rec.Code)
 	}
 }

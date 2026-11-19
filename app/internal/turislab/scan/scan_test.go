@@ -108,6 +108,71 @@ func newScanner(s store.Store, sources ...scan.Source) *scan.Scanner {
 
 // buildQueue replicates what cmd/turislab does after a scan: read the scores
 // and order them by priority (1 = first in the visit queue).
+// fakeScreenshoter records the captures a scan asks for.
+type fakeScreenshoter struct {
+	calls []struct{ id, url string }
+	err   error
+}
+
+func (f *fakeScreenshoter) Capture(_ context.Context, id, websiteURL string) (string, error) {
+	f.calls = append(f.calls, struct{ id, url string }{id, websiteURL})
+	if f.err != nil {
+		return "", f.err
+	}
+	return "/tmp/" + id + ".png", nil
+}
+
+func newScannerWith(t *testing.T, s store.Store, shot scan.Screenshoter, sources ...scan.Source) *scan.Scanner {
+	t.Helper()
+	return scan.New(scan.ScanConfig{
+		TriggerInterval:      time.Minute,
+		TargetsPerTick:       1,
+		MaxConcurrentSources: 2,
+		StaleAfterDays:       7,
+	}, s, sources, scoring.NewEngine(scoring.DefaultScoringConfig()), logx.New(io.Discard),
+		scan.WithScreenshoter(shot))
+}
+
+func TestScanOneCapturesWebsite(t *testing.T) {
+	s, ctx := setup(t)
+	dir := t.TempDir()
+	input := `[{"id": "rest-001", "name": "El Ancla", "website": "https://el-ancla.example"}]`
+	path := filepath.Join(dir, "base.json")
+	if err := os.WriteFile(path, []byte(input), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := seed.Load(ctx, s, seed.Options{Path: path}); err != nil {
+		t.Fatalf("seed.Load: %v", err)
+	}
+
+	shot := &fakeScreenshoter{}
+	if err := newScannerWith(t, s, shot).ScanOne(ctx, "rest-001"); err != nil {
+		t.Fatalf("ScanOne: %v", err)
+	}
+	if len(shot.calls) != 1 || shot.calls[0].id != "rest-001" || shot.calls[0].url != "https://el-ancla.example" {
+		t.Fatalf("captures = %+v, want one for rest-001 and its website", shot.calls)
+	}
+}
+
+func TestScanOneCapturesDiscoveredWebsiteEvenWhenCaptureFails(t *testing.T) {
+	s, ctx := setup(t)
+	seedEstablishments(t, s, ctx) // no website in the registry
+
+	finder := &fakeSource{
+		name:     "website",
+		match:    func(*model.Establishment) bool { return true },
+		kind:     model.KindWebsiteFound,
+		rawValue: "https://descubierto.example",
+	}
+	shot := &fakeScreenshoter{err: errors.New("browser unavailable")}
+	if err := newScannerWith(t, s, shot, finder).ScanOne(ctx, "rest-001"); err != nil {
+		t.Fatalf("a failed capture must not fail the scan: %v", err)
+	}
+	if len(shot.calls) != 1 || shot.calls[0].url != "https://descubierto.example" {
+		t.Fatalf("captures = %+v, want the URL discovered by Google Maps", shot.calls)
+	}
+}
+
 func buildQueue(ctx context.Context, s store.Store) []*model.Score {
 	scores, _ := s.ListScores(ctx)
 	sorted := append([]*model.Score(nil), scores...)

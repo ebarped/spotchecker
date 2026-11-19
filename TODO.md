@@ -1,5 +1,9 @@
 # TODO
 
+## Navegador / capturas
+
+- **Probar [agent-browser](https://github.com/vercel-labs/agent-browser) en vez del montaje actual con Chrome/Playwright MCP.** El sidecar `make mcp-browser` y el cliente `internal/turislab/capture` funcionan, pero agent-browser promete una capa más ligera para que el agente navegue y captured pantallas. Comparar: arranque, flags de Chromium, coste por captura, guardado del PNG en `artifacts_dir` y encaje con `agent.mcp` / `screenshots.mcp_url`. Si convence, sustituir el sidecar y simplificar `capture`.
+
 ## Agent chat
 
 - **SSE heartbeat.** A slow tool call leaves the `/api/agent/chat` stream silent, and a reverse proxy with an idle timeout could cut it. Send a `: ping` comment every ~15s. `emit` is only called from the run loop today, so the writes need a mutex once a heartbeat goroutine exists. Only matters behind a proxy.

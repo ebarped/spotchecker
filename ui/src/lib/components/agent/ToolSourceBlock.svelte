@@ -30,6 +30,12 @@
 	</summary>
 	{#if source.error}
 		<p class="px-2 py-1 text-[11px] text-error">{source.error}</p>
+		{#if source.error.includes('connection refused') || source.error.includes('dial tcp')}
+			<p class="px-2 pb-1 text-[11px] text-faint">
+				Arranca la app con <code>make serve</code> o <code>make run</code> (o solo
+				<code>make mcp-browser</code>).
+			</p>
+		{/if}
 	{:else}
 		<ul class="mb-2 mt-1 space-y-0.5" onmouseleave={() => (tip = null)}>
 			{#each source.tools as tool (tool.name)}

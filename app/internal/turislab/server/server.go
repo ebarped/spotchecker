@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -19,6 +20,7 @@ import (
 
 	"github.com/datadope/turislab-doctor/internal/logx"
 	"github.com/datadope/turislab-doctor/internal/turislab/agent"
+	"github.com/datadope/turislab-doctor/internal/turislab/artifacts"
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
 	"github.com/datadope/turislab-doctor/internal/turislab/scan"
 )
@@ -35,6 +37,9 @@ type Server struct {
 	http    atomic.Pointer[http.Server]
 	scanner scannerIface
 	metrics http.Handler
+	// artifactsDir holds website captures written by the browser MCP. Empty
+	// disables the screenshot endpoint.
+	artifactsDir string
 	// agent, when set, exposes /api/agent/info, /api/agent/tools and
 	// /api/agent/chat.
 	agent *agent.Service
@@ -52,6 +57,14 @@ func WithScanner(s scannerIface) Option {
 func WithAgent(a *agent.Service) Option {
 	return func(srv *Server) {
 		srv.agent = a
+	}
+}
+
+// WithArtifactsDir enables GET/HEAD /api/establishments/{id}/screenshot,
+// serving <dir>/<id>.png (the files the browser MCP writes from chat).
+func WithArtifactsDir(dir string) Option {
+	return func(srv *Server) {
+		srv.artifactsDir = dir
 	}
 }
 
@@ -165,6 +178,12 @@ func (s *Server) Handler() http.Handler {
 			writeJSON(w, http.StatusOK, item)
 		})
 
+		// Screenshots are runtime files, not part of the embedded UI build.
+		// HEAD lets the detail screen check for a capture cheaply and pick
+		// up its Last-Modified date before deciding to show the image.
+		r.Get("/establishments/{id}/screenshot", s.serveScreenshot)
+		r.Head("/establishments/{id}/screenshot", s.serveScreenshot)
+
 		r.Post("/establishments/{id}/refresh", func(w http.ResponseWriter, req *http.Request) {
 			if s.scanner == nil {
 				writeJSON(w, http.StatusNotFound, map[string]string{"error": "scanner not enabled"})
@@ -246,6 +265,45 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+// serveScreenshot returns the PNG the browser MCP saved for an establishment.
+// The id is validated before touching the filesystem: it is the only part of
+// the path that comes from the request.
+func (s *Server) serveScreenshot(w http.ResponseWriter, req *http.Request) {
+	id := chi.URLParam(req, "id")
+	if !artifacts.ValidID(id) {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid establishment id"})
+		return
+	}
+	if s.artifactsDir == "" {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "screenshots not enabled"})
+		return
+	}
+
+	file, err := artifacts.ScreenshotPath(s.artifactsDir, id)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid establishment id"})
+		return
+	}
+	st, err := os.Stat(file)
+	if err != nil {
+		if os.IsNotExist(err) {
+			writeJSON(w, http.StatusNotFound, map[string]string{"error": "screenshot not found"})
+		} else {
+			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "cannot read screenshot"})
+		}
+		return
+	}
+	if !st.Mode().IsRegular() {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "screenshot not found"})
+		return
+	}
+
+	// A recapture overwrites the same file; keep proxies and the browser from
+	// showing the old photo. ServeFile handles HEAD and Last-Modified.
+	w.Header().Set("Cache-Control", "no-store")
+	http.ServeFile(w, req, file)
 }
 
 // filterQueue applies the /api/queue query params: tier, category,

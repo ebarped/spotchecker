@@ -8,6 +8,9 @@
 report.json
 *.report.json
 
+# Website captures written by the Playwright MCP sidecar.
+/app/artifacts/
+
 # Local PoC database.
 turislab.db
 turislab.db-shm

@@ -10,6 +10,9 @@ type Config struct {
 	Model ModelConfig
 	// MCP lists external MCP servers (streamable HTTP) the agent may use.
 	MCP []MCPServer
+	// ArtifactsDir is the absolute folder where browser tools save files.
+	// The instruction tells the model to name screenshots <id>.png here.
+	ArtifactsDir string
 	// Suggestions overrides the suggested prompts shown in the UI. Empty
 	// uses the built-in defaults.
 	Suggestions []string
@@ -36,4 +39,9 @@ type MCPServer struct {
 	Name    string
 	URL     string
 	Headers map[string]string
+	// Tools, when non-empty, is an allowlist of tool names exposed to the
+	// model and shown in the catalog. Empty means every tool the server
+	// advertises. The capturer calls the same MCP with its own client, so
+	// filtering here does not affect automatic screenshots.
+	Tools []string
 }

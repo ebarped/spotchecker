@@ -20,18 +20,21 @@ export interface ChatMessage {
 	role: 'user' | 'assistant';
 	text: string;
 	steps: ToolStep[];
+	/** Screenshots captured by the browser MCP, shown below the answer. */
+	images?: string[];
 	/** Set when the turn ended in an error event or a failed request. */
 	error?: boolean;
 }
 
 export type StreamEvent = {
-	type: 'session' | 'delta' | 'tool_call' | 'tool_result' | 'done' | 'error';
+	type: 'session' | 'delta' | 'tool_call' | 'tool_result' | 'image' | 'done' | 'error';
 	text?: string;
 	name?: string;
 	id?: string;
 	result?: string;
 	session_id?: string;
 	message?: string;
+	image_url?: string;
 };
 
 /** Conversations keep at most this many messages in storage. */
@@ -94,6 +97,14 @@ export function applyStreamEvent(reply: ChatMessage, event: StreamEvent, turn: T
 			// Text after a result is a new round even when the text of the
 			// previous one arrived between the call and its result.
 			turn.toolSinceText = true;
+			break;
+		}
+		case 'image': {
+			// The backend only sends this once the PNG exists. A turn can
+			// capture more than one site, so keep every image in order.
+			if (!event.image_url) break;
+			const images = (reply.images ??= []);
+			if (!images.includes(event.image_url)) images.push(event.image_url);
 			break;
 		}
 		case 'error':
@@ -193,7 +204,9 @@ export function isChatMessage(value: unknown): value is ChatMessage {
 		(m.role === 'user' || m.role === 'assistant') &&
 		typeof m.text === 'string' &&
 		Array.isArray(m.steps) &&
-		m.steps.every((s) => typeof s === 'object' && s !== null && typeof s.name === 'string')
+		m.steps.every((s) => typeof s === 'object' && s !== null && typeof s.name === 'string') &&
+		(m.images === undefined ||
+			(Array.isArray(m.images) && m.images.every((u) => typeof u === 'string')))
 	);
 }
 

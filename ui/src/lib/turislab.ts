@@ -94,6 +94,8 @@ export interface Score {
 export interface QueueItem {
 	rank: number;
 	establishment: Establishment;
+	/** URL the screenshot was taken from (registry or Google Maps discovery). */
+	website_url?: string;
 	/** Null while the establishment waits for its first scan. */
 	score: Score | null;
 	primary_signals: Evidence[];

@@ -60,11 +60,29 @@ func (s *Service) Tools(ctx context.Context) ToolCatalog {
 		if err != nil {
 			source.Error = err.Error()
 		} else {
-			source.Tools = tools
+			// The sidebar must show exactly what the model can call.
+			for _, t := range tools {
+				if mcpToolAllowed(server, t.Name) {
+					source.Tools = append(source.Tools, t)
+				}
+			}
 		}
 		catalog.External = append(catalog.External, source)
 	}
 	return catalog
+}
+
+// mcpToolAllowed mirrors mcpToolFilter for the catalog's plain name list.
+func mcpToolAllowed(server MCPServer, name string) bool {
+	if len(server.Tools) == 0 {
+		return true
+	}
+	for _, allowed := range server.Tools {
+		if allowed == name {
+			return true
+		}
+	}
+	return false
 }
 
 // HandleTools serves GET /api/agent/tools.

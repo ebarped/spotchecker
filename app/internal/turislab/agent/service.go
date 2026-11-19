@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -30,6 +31,7 @@ import (
 	"google.golang.org/genai"
 
 	"github.com/datadope/turislab-doctor/internal/logx"
+	"github.com/datadope/turislab-doctor/internal/turislab/artifacts"
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
 )
 
@@ -441,6 +443,9 @@ func (s *Service) run(ctx context.Context, w http.ResponseWriter, flusher http.F
 	}
 
 	sentText := ""
+	// Screenshot calls are paired with their results here: the PNG exists
+	// only after the tool ran, so the image event is emitted on the result.
+	pendingScreenshots := make(map[string]string)
 	msg := &genai.Content{Role: "user", Parts: []*genai.Part{{Text: message}}}
 	emitted, pending := 0, false
 	for event, err := range r.Run(ctx, userID, sessionID, msg, agent.RunConfig{}) {
@@ -457,7 +462,7 @@ func (s *Service) run(ctx context.Context, w http.ResponseWriter, flusher http.F
 			continue
 		}
 		var calls, texts int
-		sentText, calls, texts = s.streamContent(w, flusher, event, sessionID, sentText)
+		sentText, calls, texts = s.streamContent(w, flusher, event, sessionID, sentText, pendingScreenshots)
 		emitted += calls + texts
 		// A tool call opens an unfinished step; only text closes it. The
 		// runner's range can end right after a tool call when the next
@@ -485,7 +490,7 @@ func (s *Service) run(ctx context.Context, w http.ResponseWriter, flusher http.F
 // and responses become tool events. It reports how many tool calls and text
 // deltas it emitted, so a run that ends without closing its last tool step
 // can be detected as the model failure it is.
-func (s *Service) streamContent(w http.ResponseWriter, flusher http.Flusher, event *session.Event, sessionID, sentText string) (string, int, int) {
+func (s *Service) streamContent(w http.ResponseWriter, flusher http.Flusher, event *session.Event, sessionID, sentText string, pendingScreenshots map[string]string) (string, int, int) {
 	if event.Content == nil {
 		return sentText, 0, 0
 	}
@@ -515,9 +520,27 @@ func (s *Service) streamContent(w http.ResponseWriter, flusher http.Flusher, eve
 			}
 			s.log.Section("agent").Info("[%s] tool → %s %s", shortID(sessionID), part.FunctionCall.Name, compactArgs(args))
 			s.emit(w, flusher, sseEvent{Type: "tool_call", ID: part.FunctionCall.ID, Name: part.FunctionCall.Name, Args: args})
+			if part.FunctionCall.Name == "browser_take_screenshot" {
+				if filename, ok := args["filename"].(string); ok {
+					if id := screenshotID(filename); id != "" {
+						pendingScreenshots[part.FunctionCall.ID] = id
+					}
+				}
+			}
 			calls++
 		case part.FunctionResponse != nil:
 			s.emit(w, flusher, sseEvent{Type: "tool_result", ID: part.FunctionResponse.ID, Name: part.FunctionResponse.Name, Result: resultPreview(part.FunctionResponse.Response)})
+			if id, ok := pendingScreenshots[part.FunctionResponse.ID]; ok {
+				delete(pendingScreenshots, part.FunctionResponse.ID)
+				if s.screenshotReady(id) {
+					// Cache-bust: a later sync overwrites the same PNG and the
+					// chat must not go on showing the previous capture.
+					s.emit(w, flusher, sseEvent{
+						Type:     "image",
+						ImageURL: fmt.Sprintf("/api/establishments/%s/screenshot?t=%d", id, time.Now().UnixNano()),
+					})
+				}
+			}
 		case event.Partial && part.Text != "" && !part.Thought:
 			sentText += part.Text
 			s.emit(w, flusher, sseEvent{Type: "delta", Text: part.Text})
@@ -632,6 +655,15 @@ func resultPreview(response any) string {
 	return truncate(string(out), maxToolResultChars)
 }
 
+// mcpToolFilter keeps the model from seeing tools the server has not
+// explicitly allowed. A nil filter means "all tools" for the ADK toolset.
+func mcpToolFilter(server MCPServer) tool.Predicate {
+	if len(server.Tools) == 0 {
+		return nil
+	}
+	return tool.AllowedToolsPredicate(server.Tools)
+}
+
 // buildToolsets collects the MCP toolsets of this chat: every configured
 // external server, by URL. They connect lazily and must be closed when the
 // chat ends.
@@ -644,7 +676,10 @@ func (s *Service) buildToolsets(ctx context.Context) ([]tool.Toolset, []io.Close
 			Endpoint:   server.URL,
 			HTTPClient: &http.Client{Transport: newHeaderTransport(server.Headers)},
 		}
-		ts, err := mcptoolset.New(mcptoolset.Config{Transport: transport})
+		ts, err := mcptoolset.New(mcptoolset.Config{
+			Transport:  transport,
+			ToolFilter: mcpToolFilter(server),
+		})
 		if err != nil {
 			return nil, nil, fmt.Errorf("connect to the mcp server %q: %w", server.Name, err)
 		}
@@ -681,6 +716,15 @@ Tool discipline:
 - Never repeat a call with the same arguments. If a result says truncated or has next_offset, narrow the filters or page with offset — do not ask for a bigger limit.
 - Once you have enough to answer, stop calling tools and write the answer.`)
 
+	if s.cfg.ArtifactsDir != "" {
+		fmt.Fprintf(&b, `
+
+Websites and screenshots — browser MCP tools:
+- To consult a website, call browser_navigate with its URL and then browser_snapshot to read its text.
+- When the user asks for a photo/screenshot of a website, call browser_take_screenshot with filename set to the absolute path %s/<establishment_id>.png, using the exact establishment id. Confirm the tool succeeded before saying the capture is saved.
+- A successful capture is shown automatically as an image right below your answer in this chat, and also in the establishment's detail screen. Never say you cannot display images, never ask the user to open another screen to see it, and never paste base64 or inline image data in the chat.`, s.cfg.ArtifactsDir)
+	}
+
 	if rep := s.report.report(); rep != nil {
 		q := rep.Summary
 		fmt.Fprintf(&b, "\n\nCurrent scan: %d establishments registered, %d scored: P0 %d, P1 %d, P2 %d, P3 %d, collect-data %d. %d confirmed closed, %d low confidence, coverage %.0f%%.",
@@ -696,6 +740,35 @@ Tool discipline:
 	return b.String()
 }
 
+// screenshotID extracts the establishment id from the filename the model
+// passes to browser_take_screenshot. Only our <artifacts_dir>/<id>.png
+// convention is recognised; anything else is ignored rather than served.
+func screenshotID(filename string) string {
+	base := filepath.Base(filepath.Clean(filename))
+	if filepath.Ext(base) != ".png" {
+		return ""
+	}
+	id := strings.TrimSuffix(base, ".png")
+	if id == "." || id == ".." || !artifacts.ValidID(id) {
+		return ""
+	}
+	return id
+}
+
+// screenshotReady checks that the capture really landed where the API reads
+// it. A failed browser tool must not leave a broken <img> in the chat.
+func (s *Service) screenshotReady(id string) bool {
+	if s.cfg.ArtifactsDir == "" {
+		return false
+	}
+	file, err := artifacts.ScreenshotPath(s.cfg.ArtifactsDir, id)
+	if err != nil {
+		return false
+	}
+	st, err := os.Stat(file)
+	return err == nil && st.Mode().IsRegular()
+}
+
 // sseEvent is one JSON payload of the chat stream. ID pairs a tool_result
 // with its tool_call: the same tool can run several times in one turn and
 // results need not arrive in order.
@@ -708,6 +781,7 @@ type sseEvent struct {
 	ID        string         `json:"id,omitempty"`
 	SessionID string         `json:"session_id,omitempty"`
 	Message   string         `json:"message,omitempty"`
+	ImageURL  string         `json:"image_url,omitempty"`
 }
 
 func (s *Service) emit(w http.ResponseWriter, flusher http.Flusher, event sseEvent) {

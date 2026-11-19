@@ -8,15 +8,41 @@ import (
 	"iter"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 
 	"github.com/datadope/turislab-doctor/internal/logx"
 	"github.com/datadope/turislab-doctor/internal/turislab/model"
+	mcpgo "github.com/modelcontextprotocol/go-sdk/mcp"
 	adkmodel "google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 )
+
+// namedTool lets us check an MCP predicate without standing up an invocation.
+type namedTool string
+
+func (t namedTool) Name() string        { return string(t) }
+func (t namedTool) Description() string { return "" }
+func (t namedTool) IsLongRunning() bool { return false }
+
+func TestMCPToolFilter(t *testing.T) {
+	if f := mcpToolFilter(MCPServer{}); f != nil {
+		t.Error("a server without an allowlist should keep every tool (nil filter)")
+	}
+	f := mcpToolFilter(MCPServer{Tools: []string{"browser_navigate"}})
+	if f == nil {
+		t.Fatal("an allowlist must produce a filter")
+	}
+	if !f(nil, namedTool("browser_navigate")) {
+		t.Error("the allowed tool was filtered out")
+	}
+	if f(nil, namedTool("browser_evaluate")) {
+		t.Error("a tool outside the allowlist was exposed")
+	}
+}
 
 // scriptedModel replays a scripted conversation: every GenerateContent call
 // consumes the next turn, and a turn is a STREAM of responses (partial
@@ -436,6 +462,130 @@ func TestHandleChatStreamsRoundTextBeforeItsToolCalls(t *testing.T) {
 	want := "delta:Checking the queue first.,tool_call,delta:The top pick is est-1."
 	if joined != want {
 		t.Fatalf("event order = %q, want %q", joined, want)
+	}
+}
+
+// screenshotToolArgs is the input of the fake browser MCP in the chat test.
+type screenshotToolArgs struct {
+	Filename string `json:"filename" jsonschema:"absolute path of the PNG"`
+}
+
+// fakeScreenshotMCP stands in for Playwright MCP: it writes the PNG the model
+// asks for so the chat can emit a real image event.
+func fakeScreenshotMCP(t *testing.T) *httptest.Server {
+	t.Helper()
+	server := mcpgo.NewServer(&mcpgo.Implementation{Name: "test-browser", Version: "0"}, nil)
+	mcpgo.AddTool(server, &mcpgo.Tool{Name: "browser_take_screenshot", Description: "Save a PNG"},
+		func(ctx context.Context, req *mcpgo.CallToolRequest, input screenshotToolArgs) (*mcpgo.CallToolResult, struct{}, error) {
+			// A filename containing "missing" simulates a failed capture.
+			if strings.Contains(input.Filename, "missing") {
+				return &mcpgo.CallToolResult{Content: []mcpgo.Content{
+					&mcpgo.TextContent{Text: "screenshot failed"},
+				}}, struct{}{}, nil
+			}
+			png := []byte("\x89PNG\r\n\x1a\nfake screenshot")
+			if err := os.WriteFile(input.Filename, png, 0o600); err != nil {
+				return nil, struct{}{}, err
+			}
+			return &mcpgo.CallToolResult{Content: []mcpgo.Content{
+				&mcpgo.TextContent{Text: "saved"},
+			}}, struct{}{}, nil
+		})
+	return httptest.NewServer(mcpgo.NewStreamableHTTPHandler(
+		func(r *http.Request) *mcpgo.Server { return server }, nil))
+}
+
+// A successful screenshot tool call must stream an image event pointing at
+// the same endpoint the detail screen uses — but only once the file exists.
+func TestHandleChatEmitsImageAfterScreenshot(t *testing.T) {
+	dir := t.TempDir()
+	const id = "A-LU-000018"
+	fake := fakeScreenshotMCP(t)
+	defer fake.Close()
+
+	model := &scriptedModel{turns: [][]*adkmodel.LLMResponse{
+		{toolCallResponse("browser_take_screenshot", map[string]any{
+			"filename": filepath.Join(dir, id+".png"),
+		})},
+		{textResponse("Aquí está la captura.", false)},
+	}}
+	cfg := Config{
+		MaxTurns:     5,
+		Model:        ModelConfig{Provider: "openai", Name: "scripted"},
+		ArtifactsDir: dir,
+		MCP: []MCPServer{{
+			Name: "browser", URL: fake.URL, Tools: []string{"browser_take_screenshot"},
+		}},
+	}
+	svc, err := New(cfg, logx.New(io.Discard),
+		WithModelFactory(func(context.Context) (adkmodel.LLM, error) { return model, nil }),
+		WithReport(fixtureReport()))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	events := chat(t, svc, `{"message":"muestrame la captura"}`)
+	var image string
+	for _, event := range events {
+		if event.Type != "image" {
+			continue
+		}
+		if image != "" {
+			t.Errorf("got %d image events, want 1", 2)
+		}
+		image = event.ImageURL
+	}
+	if !strings.HasPrefix(image, "/api/establishments/"+id+"/screenshot?t=") {
+		t.Fatalf("image event = %q, want the screenshot endpoint for %s (events: %+v)", image, id, events)
+	}
+}
+
+// A failed capture must not leave a broken image in the chat.
+func TestHandleChatSkipsImageWhenPNGMissing(t *testing.T) {
+	dir := t.TempDir()
+	fake := fakeScreenshotMCP(t)
+	defer fake.Close()
+
+	model := &scriptedModel{turns: [][]*adkmodel.LLMResponse{
+		{toolCallResponse("browser_take_screenshot", map[string]any{
+			"filename": filepath.Join(dir, "missing.png"),
+		})},
+		{textResponse("No pude capturarla.", false)},
+	}}
+	cfg := Config{
+		MaxTurns:     5,
+		Model:        ModelConfig{Provider: "openai", Name: "scripted"},
+		ArtifactsDir: dir,
+		MCP:          []MCPServer{{Name: "browser", URL: fake.URL}},
+	}
+	svc, err := New(cfg, logx.New(io.Discard),
+		WithModelFactory(func(context.Context) (adkmodel.LLM, error) { return model, nil }),
+		WithReport(fixtureReport()))
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	for _, event := range chat(t, svc, `{"message":"captura"}`) {
+		if event.Type == "image" {
+			t.Errorf("unexpected image event for a missing PNG: %+v", event)
+		}
+	}
+}
+
+func TestScreenshotID(t *testing.T) {
+	dir := t.TempDir()
+	good := filepath.Join(dir, "A-LU-000018.png")
+	if got := screenshotID(good); got != "A-LU-000018" {
+		t.Errorf("screenshotID = %q, want A-LU-000018", got)
+	}
+	// Only the basename is used, so a relative path cannot escape artifacts_dir.
+	if got := screenshotID("../outside.png"); got != "outside" {
+		t.Errorf("screenshotID = %q, want the basename id outside", got)
+	}
+	for _, bad := range []string{"", "foo.jpg", "..png", "/tmp/a b.png"} {
+		if got := screenshotID(bad); got != "" {
+			t.Errorf("screenshotID(%q) = %q, want empty", bad, got)
+		}
 	}
 }
 

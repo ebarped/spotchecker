@@ -144,6 +144,28 @@ describe('applyStreamEvent — tool steps', () => {
 	});
 });
 
+describe('applyStreamEvent — screenshots', () => {
+	it('collects image urls in order, ignoring duplicates', () => {
+		const { message } = run([
+			{ type: 'image', image_url: '/api/establishments/A-1/screenshot?t=1' },
+			{ type: 'delta', text: 'Aquí está.' },
+			{ type: 'image', image_url: '/api/establishments/A-1/screenshot?t=1' },
+			{ type: 'image', image_url: '/api/establishments/A-2/screenshot?t=2' }
+		]);
+		expect(message.images).toEqual([
+			'/api/establishments/A-1/screenshot?t=1',
+			'/api/establishments/A-2/screenshot?t=2'
+		]);
+		expect(message.text).toBe('Aquí está.');
+	});
+
+	it('ignores an image event without a url and does not finish the turn', () => {
+		const { message, turn } = run([{ type: 'image' }]);
+		expect(message.images).toBeUndefined();
+		expect(turn.finished).toBe(false);
+	});
+});
+
 describe('applyStreamEvent — terminal events', () => {
 	it('records the session id', () => {
 		const { turn } = run([{ type: 'session', session_id: 'abc' }]);
@@ -295,10 +317,21 @@ describe('persistence', () => {
 		expect(parseStoredChat(raw)).toEqual({ sessionId: '', messages: [user('q'), answer('a')] });
 	});
 
+	it('keeps screenshots through a storage round trip', () => {
+		const messages: ChatMessage[] = [user('q'), { ...answer('a'), images: ['/shot.png?t=1'] }];
+		expect(parseStoredChat(serializeChat('sid', messages))).toEqual({ sessionId: 'sid', messages });
+	});
+
 	it('isChatMessage checks the step shape', () => {
 		expect(isChatMessage({ role: 'user', text: '', steps: [{ name: 'x' }] })).toBe(true);
 		expect(isChatMessage({ role: 'user', text: '', steps: [{}] })).toBe(false);
 		expect(isChatMessage({ role: 'user', text: 1, steps: [] })).toBe(false);
+	});
+
+	it('isChatMessage rejects malformed screenshots', () => {
+		expect(isChatMessage({ role: 'assistant', text: '', steps: [], images: ['/a.png'] })).toBe(true);
+		expect(isChatMessage({ role: 'assistant', text: '', steps: [], images: '/a.png' })).toBe(false);
+		expect(isChatMessage({ role: 'assistant', text: '', steps: [], images: [1] })).toBe(false);
 	});
 });
 
