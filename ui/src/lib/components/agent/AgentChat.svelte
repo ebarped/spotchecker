@@ -22,7 +22,12 @@
 	// Keep the newest content in view while the answer streams in.
 	$effect(() => {
 		void agent.messages.length;
-		void agent.messages.at(-1)?.text.length;
+		const last = agent.messages.at(-1);
+		void last?.text.length;
+		void last?.images?.length;
+		void last?.steps.length;
+		// Track pending tool results so "working" state changes scroll into view.
+		void last?.steps.filter((s) => s.result !== undefined).length;
 		if (scroller) scroller.scrollTop = scroller.scrollHeight;
 	});
 

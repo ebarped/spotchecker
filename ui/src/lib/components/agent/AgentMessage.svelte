@@ -22,6 +22,22 @@
 			class="size-7 shrink-0 rounded-full border border-line bg-surface-2"
 		/>
 		<div class="min-w-0 flex-1 space-y-2">
+			{#if message.text !== ''}
+				<div
+					class="markdown rounded-2xl rounded-tl-md border border-line bg-surface-2/60 px-4 py-3 {message.error
+						? 'border-error/30 bg-error/10'
+						: ''}"
+				>
+					{@html html}
+					{#if live && !message.steps.some((s) => s.result === undefined && s.name !== 'error')}
+						<!-- streaming: the model is writing more text -->
+						<span
+							class="ml-1.5 inline-block size-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent align-[-2px]"
+							aria-hidden="true"
+						></span>
+					{/if}
+				</div>
+			{/if}
 			{#if message.steps.length > 0}
 				<div class="flex flex-wrap gap-1.5">
 					{#each message.steps as step, i (i)}
@@ -59,32 +75,6 @@
 					{/each}
 				</div>
 			{/if}
-			{#if message.text !== ''}
-				<div
-					class="markdown rounded-2xl rounded-tl-md border border-line bg-surface-2/60 px-4 py-3 {message.error
-						? 'border-error/30 bg-error/10'
-						: ''}"
-				>
-					{@html html}
-					{#if live}
-						<!-- streaming: a tool may be running (ml-1.5) or the model writing -->
-						<span
-							class="ml-1.5 inline-block size-3.5 animate-spin rounded-full border-2 border-accent border-t-transparent align-[-2px]"
-							aria-hidden="true"
-						></span>
-					{/if}
-				</div>
-			{:else if live}
-				<div
-					class="inline-flex items-center gap-2.5 rounded-2xl rounded-tl-md border border-line bg-surface-2/60 px-4 py-3"
-				>
-					<span
-						class="size-4 animate-spin rounded-full border-2 border-accent border-t-transparent"
-						aria-hidden="true"
-					></span>
-					<span class="text-xs text-muted">Agent is working…</span>
-				</div>
-			{/if}
 			{#if message.images?.length}
 				<div class="space-y-2">
 					{#each message.images as src, i (i)}
@@ -103,6 +93,17 @@
 							/>
 						</a>
 					{/each}
+				</div>
+			{/if}
+			{#if live && (message.text === '' || message.steps.some((s) => s.result === undefined && s.name !== 'error'))}
+				<div
+					class="inline-flex items-center gap-2.5 rounded-2xl rounded-tl-md border border-line bg-surface-2/60 px-4 py-3"
+				>
+					<span
+						class="size-4 animate-spin rounded-full border-2 border-accent border-t-transparent"
+						aria-hidden="true"
+					></span>
+					<span class="text-xs text-muted">Agent is working…</span>
 				</div>
 			{/if}
 			{#if message.error}

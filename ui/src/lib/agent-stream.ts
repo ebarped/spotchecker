@@ -45,7 +45,7 @@ export const NO_ANSWER_TEXT = 'El modelo no produjo respuesta — inténtalo de 
 
 /** Per-turn streaming state that is not part of the message itself. */
 export interface TurnState {
-	/** A tool ran since the last text: the next text opens a new paragraph. */
+	/** A tool ran since the last text: the next text opens a new segment. */
 	toolSinceText: boolean;
 	/** Milliseconds since the turn started. */
 	elapsed: () => number;
@@ -59,11 +59,31 @@ export function newTurnState(elapsed: () => number): TurnState {
 	return { toolSinceText: false, elapsed, finished: false };
 }
 
+/** The current assistant message of the turn (always the last one). */
+function currentReply(messages: ChatMessage[]): ChatMessage {
+	return messages[messages.length - 1] as ChatMessage;
+}
+
+/** Ensures the turn has a current assistant message to stream into. */
+function ensureReply(messages: ChatMessage[]): ChatMessage {
+	const last = messages[messages.length - 1];
+	if (last && last.role === 'assistant') return last;
+	const reply: ChatMessage = { role: 'assistant', text: '', steps: [] };
+	messages.push(reply);
+	return reply;
+}
+
 /**
- * Applies one SSE event to the streaming assistant message. Mutates reply
- * in place (it is a $state proxy in the app) and the turn state.
+ * Applies one SSE event to the streaming turn. Mutates messages in place (a
+ * $state proxy in the app): when the agent produces text after running tools,
+ * a new assistant message is started so each thought/step reads as its own
+ * bubble instead of one long block.
  */
-export function applyStreamEvent(reply: ChatMessage, event: StreamEvent, turn: TurnState): void {
+export function applyStreamEvent(
+	messages: ChatMessage[],
+	event: StreamEvent,
+	turn: TurnState
+): void {
 	switch (event.type) {
 		case 'session':
 			if (event.session_id) turn.sessionId = event.session_id;
@@ -71,16 +91,29 @@ export function applyStreamEvent(reply: ChatMessage, event: StreamEvent, turn: T
 		case 'delta': {
 			const text = event.text ?? '';
 			if (text === '') break;
-			// Each model round between tool calls is its own thought: without
-			// a break they glue together ("…issues.The findings…").
+			let reply = ensureReply(messages);
+			// A new round of text after tool work becomes its own message, so
+			// the conversation reads as [thought] → [tools/thinking] → [thought].
+			// Only split when the previous segment already said something; if it
+			// only ran tools, the incoming text is this segment's answer.
 			if (turn.toolSinceText && reply.text !== '') {
-				reply.text = reply.text.replace(/\s+$/, '') + '\n\n';
+				reply.text = reply.text.replace(/\s+$/, '');
+				const next: ChatMessage = { role: 'assistant', text: '', steps: [] };
+				// Images produced by the tools of the previous segment usually
+				// illustrate the answer that follows, so they move with it.
+				if (reply.images?.length) {
+					next.images = reply.images;
+					delete reply.images;
+				}
+				messages.push(next);
+				reply = next;
 			}
 			turn.toolSinceText = false;
 			reply.text += text;
 			break;
 		}
-		case 'tool_call':
+		case 'tool_call': {
+			const reply = ensureReply(messages);
 			reply.steps.push({
 				name: event.name ?? 'tool',
 				id: event.id || undefined,
@@ -88,14 +121,19 @@ export function applyStreamEvent(reply: ChatMessage, event: StreamEvent, turn: T
 			});
 			turn.toolSinceText = true;
 			break;
+		}
 		case 'tool_result': {
-			const step = findOpenStep(reply.steps, event);
-			if (step) {
-				step.end = Math.round(turn.elapsed());
-				step.result = event.result ?? '';
+			// The matching call may live in a previous segment of this turn.
+			for (let i = messages.length - 1; i >= 0; i--) {
+				const m = messages[i];
+				if (m.role !== 'assistant') break;
+				const step = findOpenStep(m.steps, event);
+				if (step) {
+					step.end = Math.round(turn.elapsed());
+					step.result = event.result ?? '';
+					break;
+				}
 			}
-			// Text after a result is a new round even when the text of the
-			// previous one arrived between the call and its result.
 			turn.toolSinceText = true;
 			break;
 		}
@@ -103,17 +141,24 @@ export function applyStreamEvent(reply: ChatMessage, event: StreamEvent, turn: T
 			// The backend only sends this once the PNG exists. A turn can
 			// capture more than one site, so keep every image in order.
 			if (!event.image_url) break;
-			const images = (reply.images ??= []);
-			if (!images.includes(event.image_url)) images.push(event.image_url);
+			const reply = currentReply(messages);
+			if (!reply || reply.role !== 'assistant') break;
+			const images = reply.images ?? [];
+			if (!images.includes(event.image_url)) {
+				reply.images = [...images, event.image_url];
+			}
 			break;
 		}
-		case 'error':
+		case 'error': {
 			turn.finished = true;
+			const reply = ensureReply(messages);
 			reply.error = true;
 			reply.steps.push({ name: 'error', result: event.message ?? 'unknown error' });
 			break;
-		case 'done':
+		}
+		case 'done': {
 			turn.finished = true;
+			const reply = ensureReply(messages);
 			// A run that finished without answering leaves an empty bubble:
 			// surface the failure instead of dropping it.
 			if (reply.text === '' && reply.steps.length === 0) {
@@ -121,6 +166,7 @@ export function applyStreamEvent(reply: ChatMessage, event: StreamEvent, turn: T
 				reply.text = NO_ANSWER_TEXT;
 			}
 			break;
+		}
 	}
 }
 
@@ -134,9 +180,11 @@ export const STOPPED_TEXT = 'La ejecución se detuvo antes de terminar la respue
  * Closes a turn the user stopped mid-run: the partial answer and its
  * steps stay as they are, because a stop is a decision, not a failure.
  */
-export function endStoppedTurn(reply: ChatMessage, turn: TurnState): void {
+export function endStoppedTurn(messages: ChatMessage[], turn: TurnState): void {
 	if (turn.finished) return;
 	turn.finished = true;
+	const reply = currentReply(messages);
+	if (!reply || reply.role !== 'assistant') return;
 	if (reply.text === '' && reply.steps.length === 0) {
 		reply.text = STOPPED_TEXT;
 	}
@@ -147,9 +195,10 @@ export function endStoppedTurn(reply: ChatMessage, turn: TurnState): void {
  * terminal event (server restart, proxy cut, network drop) is a failure,
  * not a finished answer.
  */
-export function endStream(reply: ChatMessage, turn: TurnState): void {
+export function endStream(messages: ChatMessage[], turn: TurnState): void {
 	if (turn.finished) return;
 	turn.finished = true;
+	const reply = ensureReply(messages);
 	reply.error = true;
 	reply.steps.push({ name: 'error', result: CONNECTION_LOST_TEXT });
 }

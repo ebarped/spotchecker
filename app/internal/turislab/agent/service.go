@@ -446,6 +446,7 @@ func (s *Service) run(ctx context.Context, w http.ResponseWriter, flusher http.F
 	sentText := ""
 	// Screenshot calls are paired with their results here: the PNG exists
 	// only after the tool ran, so the image event is emitted on the result.
+	// Value is the raw output path the tool was called with.
 	pendingScreenshots := make(map[string]string)
 	msg := &genai.Content{Role: "user", Parts: []*genai.Part{{Text: message}}}
 	emitted, pending := 0, false
@@ -522,22 +523,23 @@ func (s *Service) streamContent(w http.ResponseWriter, flusher http.Flusher, eve
 			s.log.Section("agent").Info("[%s] tool → %s %s", shortID(sessionID), part.FunctionCall.Name, compactArgs(args))
 			s.emit(w, flusher, sseEvent{Type: "tool_call", ID: part.FunctionCall.ID, Name: part.FunctionCall.Name, Args: args})
 			if filename, ok := screenshotArg(part.FunctionCall.Name, args); ok {
-				if id := screenshotID(filename); id != "" {
-					pendingScreenshots[part.FunctionCall.ID] = id
-				}
+				pendingScreenshots[part.FunctionCall.ID] = filename
 			}
 			calls++
 		case part.FunctionResponse != nil:
 			s.emit(w, flusher, sseEvent{Type: "tool_result", ID: part.FunctionResponse.ID, Name: part.FunctionResponse.Name, Result: resultPreview(part.FunctionResponse.Response)})
-			if id, ok := pendingScreenshots[part.FunctionResponse.ID]; ok {
+			if raw, ok := pendingScreenshots[part.FunctionResponse.ID]; ok {
 				delete(pendingScreenshots, part.FunctionResponse.ID)
-				if s.screenshotReady(id) {
+				if id, ok := s.ensureScreenshot(raw); ok {
 					// Cache-bust: a later sync overwrites the same PNG and the
 					// chat must not go on showing the previous capture.
 					s.emit(w, flusher, sseEvent{
 						Type:     "image",
 						ImageURL: fmt.Sprintf("/api/establishments/%s/screenshot?t=%d", id, time.Now().UnixNano()),
 					})
+					s.log.Section("agent").Info("[%s] screenshot emitted for %s (%s)", shortID(sessionID), id, raw)
+				} else {
+					s.log.Section("agent").Warn("[%s] screenshot not emitted (path=%q, id=%q, artifacts=%q)", shortID(sessionID), raw, screenshotID(raw), s.cfg.ArtifactsDir)
 				}
 			}
 		case event.Partial && part.Text != "" && !part.Thought:
@@ -746,9 +748,10 @@ Tool discipline:
 		fmt.Fprintf(&b, `
 
 Websites and screenshots — browser MCP tools (agent-browser):
-- To consult a website, call agent_browser_open with its url, then agent_browser_snapshot to read its text.
-- When the user asks for a photo/screenshot of a website, call agent_browser_screenshot with path set to the absolute path %s/<establishment_id>.png, using the exact establishment id. Confirm the tool succeeded before saying the capture is saved.
-- A successful capture is shown automatically as an image right below your answer in this chat, and also in the establishment's detail screen. Never say you cannot display images, never ask the user to open another screen to see it, and never paste base64 or inline image data in the chat.`, s.cfg.ArtifactsDir)
+- To consult a website, use the browser open/navigate and snapshot tools, then read its text.
+- When the user asks for a photo/screenshot of a website, you MUST: (1) identify the establishment and get its exact id from list_establishments or get_establishment_detail, (2) use the browser screenshot tool to save the capture to the exact absolute path %s/<establishment_id>.png (filename must be exactly <establishment_id>.png), (3) confirm the tool succeeded. The image appears in chat only if saved to that exact path.
+- If the user asks to see a capture in this chat, always (re)take the screenshot to %s/<establishment_id>.png so it is shown automatically below your answer. Never save screenshots to a relative path, a temporary path, or any filename other than the establishment id.
+- A successful capture is shown automatically as an image right below your answer in this chat, and also in the establishment's detail screen. Never say you cannot display images, never ask the user to open another screen to see it, and never paste base64 or inline image data in the chat.`, s.cfg.ArtifactsDir, s.cfg.ArtifactsDir)
 	}
 
 	if rep := s.report.report(); rep != nil {
@@ -767,16 +770,17 @@ Websites and screenshots — browser MCP tools (agent-browser):
 }
 
 // screenshotArg returns the output path of a browser screenshot tool call, if
-// any. agent-browser uses agent_browser_screenshot with a "path" argument;
-// Playwright MCP used browser_take_screenshot with "filename".
+// any. agent-browser MCP exposes a screenshot tool (commonly
+// agent_browser_screenshot or browser_screenshot) with a path/filename
+// argument; Playwright MCP used browser_take_screenshot with "filename".
 func screenshotArg(name string, args map[string]any) (string, bool) {
-	switch name {
-	case "agent_browser_screenshot":
-		path, ok := args["path"].(string)
-		return path, ok && path != ""
-	case "browser_take_screenshot":
-		path, ok := args["filename"].(string)
-		return path, ok && path != ""
+	if !strings.Contains(strings.ToLower(name), "screenshot") {
+		return "", false
+	}
+	for _, key := range []string{"path", "filename", "file", "output", "output_path", "outputPath", "savePath", "save_path"} {
+		if v, ok := args[key].(string); ok && v != "" {
+			return v, true
+		}
 	}
 	return "", false
 }
@@ -808,6 +812,67 @@ func (s *Service) screenshotReady(id string) bool {
 	}
 	st, err := os.Stat(file)
 	return err == nil && st.Mode().IsRegular()
+}
+
+// ensureScreenshot makes the capture available at the canonical
+// <artifacts_dir>/<id>.png path the API serves. It checks the canonical
+// location first, then falls back to the exact path the tool wrote: browser
+// tools may resolve relative paths against their own working directory, so
+// copying the file they produced into the canonical location makes the
+// capture show up in chat even when the path was not exactly the one asked for.
+func (s *Service) ensureScreenshot(rawPath string) (string, bool) {
+	id := screenshotID(rawPath)
+	if id == "" {
+		return "", false
+	}
+	if s.cfg.ArtifactsDir == "" {
+		return "", false
+	}
+	file, err := artifacts.ScreenshotPath(s.cfg.ArtifactsDir, id)
+	if err != nil {
+		return "", false
+	}
+	if st, err := os.Stat(file); err == nil && st.Mode().IsRegular() {
+		return id, true
+	}
+
+	src := filepath.Clean(rawPath)
+	if !filepath.IsAbs(src) {
+		if abs, err := filepath.Abs(src); err == nil {
+			src = abs
+		}
+	}
+	if filepath.Clean(src) == filepath.Clean(file) {
+		return "", false
+	}
+	in, err := os.Open(src)
+	if err != nil {
+		return "", false
+	}
+	defer in.Close()
+
+	if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+		return "", false
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(file), ".screenshot-*")
+	if err != nil {
+		return "", false
+	}
+	tmpName := tmp.Name()
+	if _, err := io.Copy(tmp, in); err != nil {
+		_ = tmp.Close()
+		_ = os.Remove(tmpName)
+		return "", false
+	}
+	if err := tmp.Close(); err != nil {
+		_ = os.Remove(tmpName)
+		return "", false
+	}
+	if err := os.Rename(tmpName, file); err != nil {
+		_ = os.Remove(tmpName)
+		return "", false
+	}
+	return id, true
 }
 
 // sseEvent is one JSON payload of the chat stream. ID pairs a tool_result

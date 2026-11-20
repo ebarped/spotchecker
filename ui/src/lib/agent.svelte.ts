@@ -126,9 +126,6 @@ class AgentController {
 
 		this.messages.push({ role: 'user', text: message, steps: [] });
 		this.messages.push({ role: 'assistant', text: '', steps: [] });
-		// Re-read the assistant from the array: $state proxies objects pushed
-		// into it, and mutating the raw original would never trigger the UI.
-		const reply = this.messages[this.messages.length - 1] as ChatMessage;
 		this.streaming = true;
 		const t0 = performance.now();
 		const turn: TurnState = newTurnState(() => performance.now() - t0);
@@ -143,6 +140,7 @@ class AgentController {
 				signal: abort.signal
 			});
 			if (!res.ok || !res.body) {
+				const reply = this.messages[this.messages.length - 1] as ChatMessage;
 				reply.text = httpErrorText(res.status);
 				reply.error = true;
 				return;
@@ -156,13 +154,14 @@ class AgentController {
 				if (done) break;
 				const parsed = parseSSE(buffer + decoder.decode(value, { stream: true }));
 				buffer = parsed.rest;
-				for (const event of parsed.events) this.apply(reply, event, turn);
+				for (const event of parsed.events) this.apply(event, turn);
 			}
-			endStream(reply, turn);
+			endStream(this.messages, turn);
 		} catch (error) {
 			if (abort.signal.aborted) {
-				endStoppedTurn(reply, turn);
+				endStoppedTurn(this.messages, turn);
 			} else {
+				const reply = this.messages[this.messages.length - 1] as ChatMessage;
 				reply.error = true;
 				if (reply.text === '') {
 					reply.text = `El chat falló: ${error instanceof Error ? error.message : String(error)}`;
@@ -180,9 +179,9 @@ class AgentController {
 		this.abort?.abort();
 	}
 
-	/** Applies one SSE event to the streaming reply and the session id. */
-	private apply(reply: ChatMessage, event: StreamEvent, turn: TurnState): void {
-		applyStreamEvent(reply, event, turn);
+	/** Applies one SSE event to the streaming turn and the session id. */
+	private apply(event: StreamEvent, turn: TurnState): void {
+		applyStreamEvent(this.messages, event, turn);
 		if (turn.sessionId && turn.sessionId !== this.sessionId) this.sessionId = turn.sessionId;
 	}
 

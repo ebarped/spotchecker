@@ -27,9 +27,10 @@ function reply(): ChatMessage {
 function run(events: StreamEvent[]) {
 	let clock = 0;
 	const turn = newTurnState(() => (clock += 10));
-	const message = reply();
-	for (const event of events) applyStreamEvent(message, event, turn);
-	return { message, turn };
+	const messages: ChatMessage[] = [reply()];
+	for (const event of events) applyStreamEvent(messages, event, turn);
+	const assistants = messages.filter((m) => m.role === 'assistant');
+	return { messages, assistants, message: assistants.at(-1) as ChatMessage, turn };
 }
 
 describe('applyStreamEvent — text', () => {
@@ -41,26 +42,30 @@ describe('applyStreamEvent — text', () => {
 		expect(message.text).toBe('Hello');
 	});
 
-	it('opens a new paragraph when text follows a tool call', () => {
-		const { message } = run([
+	it('splits text that follows a tool call into a new message', () => {
+		const { assistants } = run([
 			{ type: 'delta', text: 'Looking at the summary.' },
 			{ type: 'tool_call', name: 'get_report_summary', id: 'a' },
 			{ type: 'tool_result', name: 'get_report_summary', id: 'a', result: '{}' },
 			{ type: 'delta', text: 'The visit queue is dominated by two establishments.' }
 		]);
-		expect(message.text).toBe(
-			'Looking at the summary.\n\nThe visit queue is dominated by two establishments.'
-		);
+		expect(assistants).toHaveLength(2);
+		expect(assistants[0].text).toBe('Looking at the summary.');
+		expect(assistants[0].steps.map((s) => s.name)).toEqual(['get_report_summary']);
+		expect(assistants[1].text).toBe('The visit queue is dominated by two establishments.');
+		expect(assistants[1].steps).toEqual([]);
 	});
 
-	it('does not stack breaks or trailing spaces', () => {
-		const { message } = run([
+	it('trims trailing space on split and keeps segments separate', () => {
+		const { assistants } = run([
 			{ type: 'delta', text: 'First.  \n' },
 			{ type: 'tool_call', name: 't', id: '1' },
 			{ type: 'tool_call', name: 't', id: '2' },
 			{ type: 'delta', text: 'Second.' }
 		]);
-		expect(message.text).toBe('First.\n\nSecond.');
+		expect(assistants).toHaveLength(2);
+		expect(assistants[0].text).toBe('First.');
+		expect(assistants[1].text).toBe('Second.');
 	});
 
 	it('does not start the answer with a break when a tool runs first', () => {
@@ -72,23 +77,28 @@ describe('applyStreamEvent — text', () => {
 	});
 
 	it('separates rounds when the text sits between a call and its result', () => {
-		const { message } = run([
+		const { assistants } = run([
 			{ type: 'tool_call', name: 't', id: '1' },
 			{ type: 'delta', text: 'Round one.' },
 			{ type: 'tool_result', name: 't', id: '1', result: '{}' },
 			{ type: 'delta', text: '## Verdict' }
 		]);
-		expect(message.text).toBe('Round one.\n\n## Verdict');
+		expect(assistants).toHaveLength(2);
+		expect(assistants[0].text).toBe('Round one.');
+		expect(assistants[0].steps[0].result).toBe('{}');
+		expect(assistants[1].text).toBe('## Verdict');
 	});
 
-	it('ignores empty deltas without consuming the pending break', () => {
-		const { message } = run([
+	it('ignores empty deltas without consuming the pending split', () => {
+		const { assistants } = run([
 			{ type: 'delta', text: 'A.' },
 			{ type: 'tool_call', name: 't', id: '1' },
 			{ type: 'delta', text: '' },
 			{ type: 'delta', text: 'B.' }
 		]);
-		expect(message.text).toBe('A.\n\nB.');
+		expect(assistants).toHaveLength(2);
+		expect(assistants[0].text).toBe('A.');
+		expect(assistants[1].text).toBe('B.');
 	});
 });
 
@@ -159,6 +169,21 @@ describe('applyStreamEvent — screenshots', () => {
 		expect(message.text).toBe('Aquí está.');
 	});
 
+	it('moves a screenshot to the answer segment that follows the tool work', () => {
+		const { assistants } = run([
+			{ type: 'delta', text: 'Voy a capturarla.' },
+			{ type: 'tool_call', name: 'agent_browser_screenshot', id: 's' },
+			{ type: 'tool_result', name: 'agent_browser_screenshot', id: 's', result: '{}' },
+			{ type: 'image', image_url: '/api/establishments/A-1/screenshot?t=1' },
+			{ type: 'delta', text: 'Aquí tienes la captura.' }
+		]);
+		expect(assistants).toHaveLength(2);
+		expect(assistants[0].text).toBe('Voy a capturarla.');
+		expect(assistants[0].images).toBeUndefined();
+		expect(assistants[1].text).toBe('Aquí tienes la captura.');
+		expect(assistants[1].images).toEqual(['/api/establishments/A-1/screenshot?t=1']);
+	});
+
 	it('ignores an image event without a url and does not finish the turn', () => {
 		const { message, turn } = run([{ type: 'image' }]);
 		expect(message.images).toBeUndefined();
@@ -195,15 +220,15 @@ describe('applyStreamEvent — terminal events', () => {
 	});
 
 	it('endStream flags a stream cut without a terminal event', () => {
-		const { message, turn } = run([{ type: 'delta', text: 'half an ans' }]);
-		endStream(message, turn);
+		const { messages, message, turn } = run([{ type: 'delta', text: 'half an ans' }]);
+		endStream(messages, turn);
 		expect(message.error).toBe(true);
 		expect(message.steps.at(-1)?.result).toBe(CONNECTION_LOST_TEXT);
 	});
 
 	it('endStream is a no-op after done or error', () => {
-		const { message, turn } = run([{ type: 'delta', text: 'ok' }, { type: 'done' }]);
-		endStream(message, turn);
+		const { messages, message, turn } = run([{ type: 'delta', text: 'ok' }, { type: 'done' }]);
+		endStream(messages, turn);
 		expect(message.error).toBeUndefined();
 		expect(message.steps).toEqual([]);
 	});
@@ -211,23 +236,23 @@ describe('applyStreamEvent — terminal events', () => {
 
 describe('endStoppedTurn', () => {
 	it('keeps the partial answer without marking it a failure', () => {
-		const { message, turn } = run([{ type: 'delta', text: 'Half an ans' }]);
-		endStoppedTurn(message, turn);
+		const { messages, message, turn } = run([{ type: 'delta', text: 'Half an ans' }]);
+		endStoppedTurn(messages, turn);
 		expect(message.error).toBeUndefined();
 		expect(message.text).toBe('Half an ans');
 		expect(turn.finished).toBe(true);
 	});
 
 	it('fills an empty run with the stopped text instead of a blank bubble', () => {
-		const { message, turn } = run([]);
-		endStoppedTurn(message, turn);
+		const { messages, message, turn } = run([]);
+		endStoppedTurn(messages, turn);
 		expect(message.error).toBeUndefined();
 		expect(message.text).toBe(STOPPED_TEXT);
 	});
 
 	it('is a no-op after a terminal event', () => {
-		const { message, turn } = run([{ type: 'delta', text: 'ok' }, { type: 'done' }]);
-		endStoppedTurn(message, turn);
+		const { messages, message, turn } = run([{ type: 'delta', text: 'ok' }, { type: 'done' }]);
+		endStoppedTurn(messages, turn);
 		expect(message.text).toBe('ok');
 	});
 });
