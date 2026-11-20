@@ -19,9 +19,8 @@ func ScreenshotPath(dir, id string) (string, error) {
 	if dir == "" {
 		return "", fmt.Errorf("artifacts dir is empty")
 	}
-	// Playwright MCP runs in another process with its own working directory:
-	// a relative filename would be resolved against the sidecar's cwd and the
-	// PNG would land in a nested folder nobody reads.
+	// The browser runs with its own working directory: a relative filename
+	// would be resolved there and the PNG would land where nobody reads it.
 	absDir, err := filepath.Abs(dir)
 	if err != nil {
 		return "", fmt.Errorf("resolve artifacts dir: %w", err)

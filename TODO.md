@@ -2,7 +2,7 @@
 
 ## Navegador / capturas
 
-- **Probar [agent-browser](https://github.com/vercel-labs/agent-browser) en vez del montaje actual con Chrome/Playwright MCP.** El sidecar `make mcp-browser` y el cliente `internal/turislab/capture` funcionan, pero agent-browser promete una capa más ligera para que el agente navegue y captured pantallas. Comparar: arranque, flags de Chromium, coste por captura, guardado del PNG en `artifacts_dir` y encaje con `agent.mcp` / `screenshots.mcp_url`. Si convence, sustituir el sidecar y simplificar `capture`.
+- **[hecho] Migración a [agent-browser](https://github.com/vercel-labs/agent-browser).** Se ha reemplazado el montaje con Chrome/Playwright MCP: capturas automáticas por CLI `agent-browser` (sin sidecar HTTP) y navegador del chat por `agent-browser mcp` (stdio). Seguimiento: observar fiabilidad/429/coste en uso real y afinar la allowlist de herramientas del chat (`agent.mcp[].tools`) si hace falta.
 
 ## Agent chat
 

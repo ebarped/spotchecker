@@ -49,6 +49,7 @@ func fixtureReport() *model.Report {
 		Queue: []model.QueueItem{
 			{
 				Rank: 1, Establishment: est1,
+				WebsiteURL: "https://discovered-hotelsolyplaya.example",
 				Score: &model.Score{
 					EstablishmentID: "est-1", ComputedAt: fixtureTime,
 					Tier: model.TierP0, Priority: 92, ClosureRisk: 0.85, QualityRisk: 0.3,
@@ -157,6 +158,9 @@ func TestListEstablishmentsOrderAndOutline(t *testing.T) {
 	if first.Municipality != "Fuengirola" || first.Category != "hotel" {
 		t.Errorf("first outline = %+v, want the registry fields", first)
 	}
+	if first.WebsiteURL != "https://discovered-hotelsolyplaya.example" {
+		t.Errorf("website_url = %q, want the enriched/discovered URL", first.WebsiteURL)
+	}
 	if first.EvidenceCount != 2 {
 		t.Errorf("evidence_count = %d, want 2", first.EvidenceCount)
 	}
@@ -261,6 +265,15 @@ func TestEstablishmentDetailFound(t *testing.T) {
 	}
 	if detail.Establishment["municipality"] != "Fuengirola" || detail.Establishment["category"] != "hotel" {
 		t.Errorf("establishment registry fields = %v", detail.Establishment)
+	}
+	if detail.Establishment["website"] != "https://hotelsolyplaya.example" {
+		t.Errorf("registry website = %v, want the registry field", detail.Establishment["website"])
+	}
+	if detail.Establishment["website_url"] != "https://discovered-hotelsolyplaya.example" {
+		t.Errorf("website_url = %v, want the enriched/discovered URL", detail.Establishment["website_url"])
+	}
+	if detail.Establishment["screenshot_url"] != "/api/establishments/est-1/screenshot" {
+		t.Errorf("screenshot_url = %v, want the capture endpoint", detail.Establishment["screenshot_url"])
 	}
 	if detail.Score["tier"] != "P0" || detail.Score["status"] != "closure_confirmed" {
 		t.Errorf("score = %v", detail.Score)

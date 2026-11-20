@@ -467,24 +467,24 @@ func TestHandleChatStreamsRoundTextBeforeItsToolCalls(t *testing.T) {
 
 // screenshotToolArgs is the input of the fake browser MCP in the chat test.
 type screenshotToolArgs struct {
-	Filename string `json:"filename" jsonschema:"absolute path of the PNG"`
+	Path string `json:"path" jsonschema:"absolute path of the PNG"`
 }
 
-// fakeScreenshotMCP stands in for Playwright MCP: it writes the PNG the model
-// asks for so the chat can emit a real image event.
+// fakeScreenshotMCP stands in for agent-browser MCP: it writes the PNG the
+// model asks for so the chat can emit a real image event.
 func fakeScreenshotMCP(t *testing.T) *httptest.Server {
 	t.Helper()
 	server := mcpgo.NewServer(&mcpgo.Implementation{Name: "test-browser", Version: "0"}, nil)
-	mcpgo.AddTool(server, &mcpgo.Tool{Name: "browser_take_screenshot", Description: "Save a PNG"},
+	mcpgo.AddTool(server, &mcpgo.Tool{Name: "agent_browser_screenshot", Description: "Save a PNG"},
 		func(ctx context.Context, req *mcpgo.CallToolRequest, input screenshotToolArgs) (*mcpgo.CallToolResult, struct{}, error) {
-			// A filename containing "missing" simulates a failed capture.
-			if strings.Contains(input.Filename, "missing") {
+			// A path containing "missing" simulates a failed capture.
+			if strings.Contains(input.Path, "missing") {
 				return &mcpgo.CallToolResult{Content: []mcpgo.Content{
 					&mcpgo.TextContent{Text: "screenshot failed"},
 				}}, struct{}{}, nil
 			}
 			png := []byte("\x89PNG\r\n\x1a\nfake screenshot")
-			if err := os.WriteFile(input.Filename, png, 0o600); err != nil {
+			if err := os.WriteFile(input.Path, png, 0o600); err != nil {
 				return nil, struct{}{}, err
 			}
 			return &mcpgo.CallToolResult{Content: []mcpgo.Content{
@@ -504,8 +504,8 @@ func TestHandleChatEmitsImageAfterScreenshot(t *testing.T) {
 	defer fake.Close()
 
 	model := &scriptedModel{turns: [][]*adkmodel.LLMResponse{
-		{toolCallResponse("browser_take_screenshot", map[string]any{
-			"filename": filepath.Join(dir, id+".png"),
+		{toolCallResponse("agent_browser_screenshot", map[string]any{
+			"path": filepath.Join(dir, id+".png"),
 		})},
 		{textResponse("Aquí está la captura.", false)},
 	}}
@@ -514,7 +514,7 @@ func TestHandleChatEmitsImageAfterScreenshot(t *testing.T) {
 		Model:        ModelConfig{Provider: "openai", Name: "scripted"},
 		ArtifactsDir: dir,
 		MCP: []MCPServer{{
-			Name: "browser", URL: fake.URL, Tools: []string{"browser_take_screenshot"},
+			Name: "browser", URL: fake.URL, Tools: []string{"agent_browser_screenshot"},
 		}},
 	}
 	svc, err := New(cfg, logx.New(io.Discard),
@@ -547,8 +547,8 @@ func TestHandleChatSkipsImageWhenPNGMissing(t *testing.T) {
 	defer fake.Close()
 
 	model := &scriptedModel{turns: [][]*adkmodel.LLMResponse{
-		{toolCallResponse("browser_take_screenshot", map[string]any{
-			"filename": filepath.Join(dir, "missing.png"),
+		{toolCallResponse("agent_browser_screenshot", map[string]any{
+			"path": filepath.Join(dir, "missing.png"),
 		})},
 		{textResponse("No pude capturarla.", false)},
 	}}

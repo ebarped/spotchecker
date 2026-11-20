@@ -65,8 +65,8 @@ func TestScreenshotsEnabledByDefaultAndArtifactsDirResolved(t *testing.T) {
 	if !cfg.Screenshots.Enabled {
 		t.Error("screenshots.enabled should default to true")
 	}
-	if got, want := cfg.Screenshots.MCPURL, "http://127.0.0.1:8931/mcp"; got != want {
-		t.Errorf("mcp_url = %q, want %q", got, want)
+	if got, want := cfg.Screenshots.Session, "turislab-capture"; got != want {
+		t.Errorf("session = %q, want %q", got, want)
 	}
 	if cfg.Screenshots.TimeoutSeconds != 60 {
 		t.Errorf("timeout_seconds = %d, want 60", cfg.Screenshots.TimeoutSeconds)

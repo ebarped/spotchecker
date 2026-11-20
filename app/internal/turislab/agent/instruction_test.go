@@ -9,9 +9,9 @@ func TestInstructionIncludesScreenshotRule(t *testing.T) {
 	svc := &Service{cfg: Config{ArtifactsDir: "/srv/artifacts"}}
 	got := svc.instruction()
 	for _, want := range []string{
-		"browser_take_screenshot",
+		"agent_browser_screenshot",
 		"/srv/artifacts/<establishment_id>.png",
-		"browser_snapshot",
+		"agent_browser_snapshot",
 		"shown automatically as an image right below your answer",
 	} {
 		if !strings.Contains(got, want) {
@@ -20,7 +20,7 @@ func TestInstructionIncludesScreenshotRule(t *testing.T) {
 	}
 
 	bare := (&Service{}).instruction()
-	if strings.Contains(bare, "browser_take_screenshot") {
+	if strings.Contains(bare, "agent_browser_screenshot") {
 		t.Error("instruction mentions screenshots without an artifacts directory")
 	}
 }

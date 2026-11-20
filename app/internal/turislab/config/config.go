@@ -258,11 +258,19 @@ type ServerConfig struct {
 	StaticDir    string   `yaml:"static_dir"`
 }
 
-// ScreenshotConfig drives the automatic website capture on every scan. It
-// uses the Playwright MCP sidecar; artifacts_dir says where the PNGs land.
+// ScreenshotConfig drives the automatic website capture on every scan using
+// the agent-browser CLI.
 type ScreenshotConfig struct {
-	Enabled        bool     `yaml:"enabled"`
-	MCPURL         string   `yaml:"mcp_url"`
+	Enabled bool `yaml:"enabled"`
+	// Command overrides the agent-browser executable and fixed leading args.
+	// Empty auto-detects "agent-browser" in PATH or falls back to
+	// "npx -y agent-browser@latest".
+	Command []string `yaml:"command"`
+	// Session is the agent-browser session name.
+	Session string `yaml:"session"`
+	// ExecutablePath points agent-browser at a browser binary
+	// (AGENT_BROWSER_EXECUTABLE_PATH), e.g. /usr/bin/chromium.
+	ExecutablePath string   `yaml:"executable_path"`
 	MinInterval    Duration `yaml:"min_interval"`
 	TimeoutSeconds int      `yaml:"timeout_seconds"`
 }
@@ -297,12 +305,17 @@ type JudgeConfig struct {
 	MaxSignals int `yaml:"max_signals"`
 }
 
-// MCPServerConfig points the agent at one external MCP server (streamable
-// HTTP) whose tools join the chat.
+// MCPServerConfig points the agent at one external MCP server whose tools join
+// the chat. When Command is set the server runs as a stdio subprocess;
+// otherwise the agent connects to URL over streamable HTTP.
 type MCPServerConfig struct {
 	Name    string            `yaml:"name"`
 	URL     string            `yaml:"url"`
 	Headers map[string]string `yaml:"headers"`
+	// Command runs a stdio MCP server (executable + args).
+	Command []string `yaml:"command"`
+	// Env adds environment variables to a Command server.
+	Env map[string]string `yaml:"env"`
 	// Tools is an optional allowlist; empty exposes every advertised tool.
 	Tools []string `yaml:"tools"`
 }
@@ -397,7 +410,8 @@ func Default() Config {
 		ArtifactsDir: "./artifacts",
 		Screenshots: ScreenshotConfig{
 			Enabled:        true,
-			MCPURL:         "http://127.0.0.1:8931/mcp",
+			Session:        "turislab-capture",
+			MinInterval:    Duration{Duration: 0},
 			TimeoutSeconds: 60,
 		},
 		Metrics: MetricsConfig{
@@ -460,8 +474,8 @@ func (c *Config) resolvePaths(baseDir string) {
 	c.Sources.Overture.LocalPath = resolve(c.Sources.Overture.LocalPath)
 	c.Server.StaticDir = resolve(c.Server.StaticDir)
 	c.ArtifactsDir = resolve(c.ArtifactsDir)
-	// The browser MCP sidecar has a different working directory and the chat
-	// prompt embeds this path in a tool argument, so it must be absolute.
+	// The chat prompt embeds this path in a tool argument and the browser
+	// runs with its own working directory, so it must be absolute.
 	if c.ArtifactsDir != "" && !filepath.IsAbs(c.ArtifactsDir) {
 		if abs, err := filepath.Abs(c.ArtifactsDir); err == nil {
 			c.ArtifactsDir = abs

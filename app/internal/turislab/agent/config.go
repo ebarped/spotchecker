@@ -34,14 +34,20 @@ type ModelConfig struct {
 	APIKeyEnv string
 }
 
-// MCPServer is one external MCP server the agent may call.
+// MCPServer is one external MCP server the agent may call. When Command is
+// set the server runs as a stdio subprocess (e.g. agent-browser mcp);
+// otherwise the agent connects to URL over streamable HTTP.
 type MCPServer struct {
 	Name    string
 	URL     string
 	Headers map[string]string
+	// Command runs a stdio MCP server. The first element is the executable
+	// and the rest are its arguments. When set, URL/Headers are ignored.
+	Command []string
+	// Env adds environment variables (KEY=value) to a Command server.
+	Env map[string]string
 	// Tools, when non-empty, is an allowlist of tool names exposed to the
 	// model and shown in the catalog. Empty means every tool the server
-	// advertises. The capturer calls the same MCP with its own client, so
-	// filtering here does not affect automatic screenshots.
+	// advertises.
 	Tools []string
 }

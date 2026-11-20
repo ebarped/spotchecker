@@ -2,7 +2,7 @@ package agent
 
 // The tool catalog behind the UI sidebar: which tools the agent carries,
 // grouped by origin. Built-in covers the local scan report helpers;
-// external covers every MCP server configured by URL.
+// external covers every MCP server the agent is configured with.
 
 import (
 	"context"
@@ -56,7 +56,7 @@ func (s *Service) Tools(ctx context.Context) ToolCatalog {
 
 	for _, server := range s.cfg.MCP {
 		source := ToolSource{Key: "mcp:" + server.Name, Label: server.Name, Tools: []ToolInfo{}}
-		tools, err := listMCPTools(ctx, server.URL, server.Headers)
+		tools, err := listMCPTools(ctx, server)
 		if err != nil {
 			source.Error = err.Error()
 		} else {
@@ -90,18 +90,13 @@ func (s *Service) HandleTools(w http.ResponseWriter, r *http.Request) {
 	writeAgentJSON(w, http.StatusOK, s.Tools(r.Context()))
 }
 
-// listMCPTools connects to an external streamable HTTP MCP server and lists
-// its tools.
-func listMCPTools(ctx context.Context, endpoint string, headers map[string]string) ([]ToolInfo, error) {
-	transport := &mcpgo.StreamableClientTransport{
-		Endpoint:   endpoint,
-		HTTPClient: &http.Client{Transport: newHeaderTransport(headers)},
-	}
-	tools, err := listMCPToolsFromTransport(ctx, transport)
+// listMCPTools connects to an external MCP server and lists its tools.
+func listMCPTools(ctx context.Context, server MCPServer) ([]ToolInfo, error) {
+	transport, err := mcpTransport(server)
 	if err != nil {
 		return nil, err
 	}
-	return tools, nil
+	return listMCPToolsFromTransport(ctx, transport)
 }
 
 // listMCPToolsFromTransport connects an MCP client over the given transport

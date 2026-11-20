@@ -2,76 +2,61 @@ package capture
 
 import (
 	"context"
-	"net/http"
-	"net/http/httptest"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
-
-	mcpgo "github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// fakeBrowser is an MCP server with the two Playwright tools the capturer uses.
-// The "screenshot" tool writes the file itself, like Playwright MCP does.
-type fakeBrowser struct {
-	mu          sync.Mutex
-	navigated   []string
-	files       []string
-	navigateErr bool
-	shots       int
-}
-
-func (f *fakeBrowser) handler() http.Handler {
-	srv := mcpgo.NewServer(&mcpgo.Implementation{Name: "fake-playwright", Version: "0.1.0"}, nil)
-	mcpgo.AddTool(srv, &mcpgo.Tool{Name: "browser_navigate"},
-		func(_ context.Context, _ *mcpgo.CallToolRequest, in struct {
-			URL string `json:"url"`
-		}) (*mcpgo.CallToolResult, any, error) {
-			f.mu.Lock()
-			f.navigated = append(f.navigated, in.URL)
-			fail := f.navigateErr
-			f.mu.Unlock()
-			if fail {
-				return &mcpgo.CallToolResult{IsError: true, Content: []mcpgo.Content{
-					&mcpgo.TextContent{Text: "net::ERR_CONNECTION_REFUSED"},
-				}}, nil, nil
-			}
-			return nil, "ok", nil
-		})
-	mcpgo.AddTool(srv, &mcpgo.Tool{Name: "browser_take_screenshot"},
-		func(_ context.Context, _ *mcpgo.CallToolRequest, in struct {
-			Filename string `json:"filename"`
-		}) (*mcpgo.CallToolResult, any, error) {
-			f.mu.Lock()
-			f.files = append(f.files, in.Filename)
-			f.shots++
-			f.mu.Unlock()
-			if err := os.WriteFile(in.Filename, []byte("png bytes"), 0o600); err != nil {
-				return nil, nil, err
-			}
-			return nil, "ok", nil
-		})
-	return mcpgo.NewStreamableHTTPHandler(func(*http.Request) *mcpgo.Server {
-		return srv
-	}, &mcpgo.StreamableHTTPOptions{JSONResponse: true})
-}
-
-func (f *fakeBrowser) counts() (int, []string, []string) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.shots, append([]string(nil), f.navigated...), append([]string(nil), f.files...)
+func writeFakeAgentBrowser(t *testing.T, failOpen bool) []string {
+	t.Helper()
+	dir := t.TempDir()
+	script := filepath.Join(dir, "agent-browser")
+	fail := "0"
+	if failOpen {
+		fail = "1"
+	}
+	body := fmt.Sprintf(`#!/bin/sh
+set -eu
+fail_open=%s
+log="${FAKE_AB_LOG:-}"
+cmd=""
+url=""
+file=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --session) shift 2 ;;
+    open) cmd=open; url="${2:-}"; shift 2 ;;
+    screenshot) cmd=screenshot; file="${2:-}"; shift 2 ;;
+    *) shift ;;
+  esac
+done
+if [ -n "$log" ]; then printf '%%s\n' "$cmd $url$file" >> "$log"; fi
+if [ "$cmd" = "open" ]; then
+  if [ "$fail_open" = "1" ]; then echo "net::ERR_NAME_NOT_RESOLVED" >&2; exit 1; fi
+  exit 0
+fi
+if [ "$cmd" = "screenshot" ]; then
+  printf 'PNG' > "$file"
+  exit 0
+fi
+echo "unknown args" >&2
+exit 1
+`, fail)
+	if err := os.WriteFile(script, []byte(body), 0o755); err != nil {
+		t.Fatalf("write fake agent-browser: %v", err)
+	}
+	return []string{script}
 }
 
 func TestCaptureWritesScreenshotAtTheGivenPath(t *testing.T) {
 	dir := t.TempDir()
-	browser := &fakeBrowser{}
-	httpSrv := httptest.NewServer(browser.handler())
-	defer httpSrv.Close()
+	logPath := filepath.Join(dir, "calls.log")
+	t.Setenv("FAKE_AB_LOG", logPath)
 
-	cap := New(Config{MCPURL: httpSrv.URL, ArtifactsDir: dir})
+	cap := New(Config{Command: writeFakeAgentBrowser(t, false), ArtifactsDir: dir})
 	got, err := cap.Capture(context.Background(), "R-LU-000710", "https://example.com/")
 	if err != nil {
 		t.Fatalf("Capture: %v", err)
@@ -80,22 +65,22 @@ func TestCaptureWritesScreenshotAtTheGivenPath(t *testing.T) {
 	if got != want {
 		t.Errorf("path = %q, want %q", got, want)
 	}
-	if data, err := os.ReadFile(want); err != nil || string(data) != "png bytes" {
+	if data, err := os.ReadFile(want); err != nil || string(data) != "PNG" {
 		t.Errorf("screenshot file: data=%q err=%v", data, err)
 	}
-	shots, urls, files := browser.counts()
-	if shots != 1 || len(urls) != 1 || urls[0] != "https://example.com/" || len(files) != 1 || files[0] != want {
-		t.Errorf("MCP calls: shots=%d urls=%q files=%q", shots, urls, files)
+	logBytes, _ := os.ReadFile(logPath)
+	log := string(logBytes)
+	if !strings.Contains(log, "open https://example.com/") || !strings.Contains(log, "screenshot "+want) {
+		t.Errorf("agent-browser calls = %q", log)
 	}
 }
 
 func TestCaptureMinIntervalSkipsRecapture(t *testing.T) {
 	dir := t.TempDir()
-	browser := &fakeBrowser{}
-	httpSrv := httptest.NewServer(browser.handler())
-	defer httpSrv.Close()
+	logPath := filepath.Join(dir, "calls.log")
+	t.Setenv("FAKE_AB_LOG", logPath)
 
-	cap := New(Config{MCPURL: httpSrv.URL, ArtifactsDir: dir, MinInterval: time.Hour})
+	cap := New(Config{Command: writeFakeAgentBrowser(t, false), ArtifactsDir: dir, MinInterval: time.Hour})
 	first, err := cap.Capture(context.Background(), "rest-001", "https://example.com")
 	if err != nil || first == "" {
 		t.Fatalf("first Capture = (%q, %v), want a file path", first, err)
@@ -104,27 +89,23 @@ func TestCaptureMinIntervalSkipsRecapture(t *testing.T) {
 	if err != nil || second != "" {
 		t.Fatalf("second Capture = (%q, %v), want (\"\", nil)", second, err)
 	}
-	if shots, _, _ := browser.counts(); shots != 1 {
-		t.Errorf("screenshot tool called %d times, want 1", shots)
+	logBytes, _ := os.ReadFile(logPath)
+	if got := strings.Count(string(logBytes), "open "); got != 1 {
+		t.Errorf("open calls = %d, want 1; log=%q", got, logBytes)
 	}
 
 	// With no interval every call recaptures, overwriting the same file.
-	fresh := New(Config{MCPURL: httpSrv.URL, ArtifactsDir: dir})
+	fresh := New(Config{Command: writeFakeAgentBrowser(t, false), ArtifactsDir: dir})
 	for range 2 {
 		if _, err := fresh.Capture(context.Background(), "rest-001", "https://example.com"); err != nil {
 			t.Fatalf("Capture: %v", err)
 		}
 	}
-	if shots, _, _ := browser.counts(); shots != 3 {
-		t.Errorf("screenshot tool called %d times, want 3", shots)
-	}
 }
 
 func TestCaptureRejectsBadInput(t *testing.T) {
-	browser := &fakeBrowser{}
-	httpSrv := httptest.NewServer(browser.handler())
-	defer httpSrv.Close()
-	cap := New(Config{MCPURL: httpSrv.URL, ArtifactsDir: t.TempDir()})
+	dir := t.TempDir()
+	cap := New(Config{Command: []string{"/bin/false"}, ArtifactsDir: dir})
 
 	for _, tc := range []struct{ id, site string }{
 		{"../outside", "https://example.com"},
@@ -136,22 +117,19 @@ func TestCaptureRejectsBadInput(t *testing.T) {
 			t.Errorf("Capture(%q, %q) succeeded, want an error", tc.id, tc.site)
 		}
 	}
-	if shots, _, _ := browser.counts(); shots != 0 {
-		t.Errorf("browser touched %d times for rejected input", shots)
+	if _, err := os.Stat(filepath.Join(dir, "rest-001.png")); !os.IsNotExist(err) {
+		t.Errorf("screenshot should not be written for rejected input: %v", err)
 	}
 }
 
-func TestCaptureReportsToolErrors(t *testing.T) {
-	browser := &fakeBrowser{navigateErr: true}
-	httpSrv := httptest.NewServer(browser.handler())
-	defer httpSrv.Close()
-	cap := New(Config{MCPURL: httpSrv.URL, ArtifactsDir: t.TempDir()})
-
+func TestCaptureReportsErrors(t *testing.T) {
+	dir := t.TempDir()
+	cap := New(Config{Command: writeFakeAgentBrowser(t, true), ArtifactsDir: dir})
 	_, err := cap.Capture(context.Background(), "rest-001", "https://example.com")
-	if err == nil || !strings.Contains(err.Error(), "ERR_CONNECTION_REFUSED") {
-		t.Fatalf("Capture error = %v, want the browser's message", err)
+	if err == nil || !strings.Contains(err.Error(), "ERR_NAME_NOT_RESOLVED") {
+		t.Fatalf("Capture error = %v, want navigation failure", err)
 	}
-	if shots, _, _ := browser.counts(); shots != 0 {
-		t.Errorf("screenshot tool called after a failed navigation: %d", shots)
+	if _, statErr := os.Stat(filepath.Join(dir, "rest-001.png")); !os.IsNotExist(statErr) {
+		t.Errorf("screenshot should not exist after failed open: %v", statErr)
 	}
 }

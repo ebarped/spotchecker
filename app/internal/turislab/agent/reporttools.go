@@ -49,6 +49,7 @@ type establishmentOutline struct {
 	Name          string  `json:"name"`
 	Category      string  `json:"category,omitempty"`
 	Municipality  string  `json:"municipality,omitempty"`
+	WebsiteURL    string  `json:"website_url,omitempty"`
 	Tier          string  `json:"tier"`
 	Priority      float64 `json:"priority"`
 	ClosureRisk   float64 `json:"closure_risk"`
@@ -98,6 +99,7 @@ func estOutline(item model.QueueItem) establishmentOutline {
 		Name:         item.Establishment.Name,
 		Category:     string(item.Establishment.Category),
 		Municipality: item.Establishment.Municipality,
+		WebsiteURL:   item.WebsiteURL,
 	}
 	if item.Score != nil {
 		out.Tier = string(item.Score.Tier)
@@ -183,7 +185,7 @@ func reportSummary(report *model.Report) map[string]any {
 }
 
 // estDetail is one establishment as the agent sees it: the registry fields,
-// the full score breakdown and the primary evidence signals.
+// enriched scan data, the full score breakdown and the primary evidence signals.
 type estDetail struct {
 	Establishment map[string]any   `json:"establishment"`
 	Score         map[string]any   `json:"score"`
@@ -222,6 +224,13 @@ func establishmentDetail(report *model.Report, id string) (*estDetail, error) {
 		if e.GooglePlaceID != "" {
 			est["google_place_id"] = e.GooglePlaceID
 		}
+		// Enriched scan fields: the effective/discovered website used for
+		// captures (may differ from or be present when the registry website
+		// is empty) and the URL of the saved website screenshot, if any.
+		if item.WebsiteURL != "" {
+			est["website_url"] = item.WebsiteURL
+		}
+		est["screenshot_url"] = "/api/establishments/" + e.ID + "/screenshot"
 
 		score := map[string]any{}
 		if s := item.Score; s != nil {
@@ -392,8 +401,9 @@ func buildTools(source reportSource) []tool.Tool {
 		ID string `json:"id"`
 	}
 	detailTool := newTool(functiontool.New(functiontool.Config{
-		Name:        "get_establishment_detail",
-		Description: "Full detail of one establishment by id: registry fields, the score breakdown (closure risk, quality risk, confidence, suggested status and reason) and the primary evidence signals behind the score. Get ids from list_establishments.",
+		Name: "get_establishment_detail",
+		Description: "Full detail of one establishment by id: registry fields, enriched scan data (discovered/captured website_url and screenshot_url of the saved website capture), " +
+			"the score breakdown (closure risk, quality risk, confidence, suggested status and reason) and the primary evidence signals behind the score. Get ids from list_establishments.",
 	}, func(_ agent.Context, args detailArgs) (*estDetail, error) {
 		return establishmentDetail(source.report(), strings.TrimSpace(args.ID))
 	}))

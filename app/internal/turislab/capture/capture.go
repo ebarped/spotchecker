@@ -1,30 +1,36 @@
-// Package capture takes website screenshots through the Playwright MCP
-// sidecar. It is deliberately thin: the browser, the navigation and the PNG
-// writing all belong to the MCP server; this package only wires them into a
-// scan and keeps the calls from stepping on each other.
+// Package capture takes website screenshots for scans and the chat using the
+// agent-browser CLI. It is deliberately thin: navigation and PNG writing
+// belong to agent-browser; this package wires them into a scan and keeps
+// calls from stepping on each other.
 package capture
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
 	"net/url"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
 
-	mcpgo "github.com/modelcontextprotocol/go-sdk/mcp"
-
 	"github.com/datadope/turislab-doctor/internal/turislab/artifacts"
 )
 
-// Config configures the MCP-backed screenshotter.
+// Config configures the screenshotter.
 type Config struct {
-	// MCPURL is the streamable HTTP endpoint of Playwright MCP.
-	MCPURL string
-	// ArtifactsDir is the absolute folder where the MCP writes the PNGs.
+	// Command is the agent-browser executable and fixed leading args.
+	// Empty auto-detects "agent-browser" in PATH or falls back to npx.
+	Command []string
+	// Session is the agent-browser session name.
+	Session string
+	// ExecutablePath sets AGENT_BROWSER_EXECUTABLE_PATH for the CLI
+	// (e.g. /usr/bin/chromium).
+	ExecutablePath string
+	// ArtifactsDir is the folder where PNGs are written.
 	ArtifactsDir string
-	// Timeout bounds one capture, MCP connection included.
+	// Timeout bounds one capture.
 	Timeout time.Duration
 	// MinInterval skips a recapture of the same id within this window.
 	// Zero captures on every call.
@@ -32,7 +38,7 @@ type Config struct {
 }
 
 // Capture implements scan.Screenshoter. One instance is shared by the scanner
-// and the chat, so the mutex serializes access to the single browser session.
+// and the chat, so the mutex serializes access to the browser session.
 type Capture struct {
 	cfg  Config
 	mu   sync.Mutex
@@ -40,13 +46,23 @@ type Capture struct {
 }
 
 func New(cfg Config) *Capture {
-	if cfg.MCPURL == "" {
-		cfg.MCPURL = "http://127.0.0.1:8931/mcp"
-	}
 	if cfg.Timeout <= 0 {
 		cfg.Timeout = 60 * time.Second
 	}
+	if len(cfg.Command) == 0 {
+		cfg.Command = defaultCommand()
+	}
+	if cfg.Session == "" {
+		cfg.Session = "turislab-capture"
+	}
 	return &Capture{cfg: cfg, last: make(map[string]time.Time)}
+}
+
+func defaultCommand() []string {
+	if p, err := exec.LookPath("agent-browser"); err == nil {
+		return []string{p}
+	}
+	return []string{"npx", "-y", "agent-browser@latest"}
 }
 
 // Capture navigates to websiteURL and saves <ArtifactsDir>/<id>.png. It returns
@@ -69,61 +85,41 @@ func (c *Capture) Capture(ctx context.Context, id, websiteURL string) (string, e
 	ctx, cancel := context.WithTimeout(ctx, c.cfg.Timeout)
 	defer cancel()
 
-	transport := &mcpgo.StreamableClientTransport{Endpoint: c.cfg.MCPURL}
-	client := mcpgo.NewClient(&mcpgo.Implementation{Name: "turislab-capture", Version: "0.1.0"}, nil)
-	session, err := client.Connect(ctx, transport, nil)
-	if err != nil {
-		return "", fmt.Errorf("connect to browser MCP: %w", err)
+	if err := c.run(ctx, "open", websiteURL); err != nil {
+		return "", fmt.Errorf("agent-browser open: %w", err)
 	}
-	defer func() { _ = session.Close() }()
-
-	res, err := session.CallTool(ctx, &mcpgo.CallToolParams{
-		Name:      "browser_navigate",
-		Arguments: map[string]any{"url": websiteURL},
-	})
-	if err != nil {
-		return "", fmt.Errorf("browser_navigate: %w", err)
-	}
-	if err := toolError(res, "browser_navigate"); err != nil {
-		return "", err
-	}
-
-	// An absolute filename is what the spike verified with --ignore-roots:
-	// relative names resolve against the MCP server's working directory.
-	res, err = session.CallTool(ctx, &mcpgo.CallToolParams{
-		Name:      "browser_take_screenshot",
-		Arguments: map[string]any{"filename": file},
-	})
-	if err != nil {
-		return "", fmt.Errorf("browser_take_screenshot: %w", err)
-	}
-	if err := toolError(res, "browser_take_screenshot"); err != nil {
-		return "", err
+	if err := c.run(ctx, "screenshot", file); err != nil {
+		return "", fmt.Errorf("agent-browser screenshot: %w", err)
 	}
 
 	c.last[id] = time.Now()
 	return file, nil
 }
 
-// toolError turns an MCP tool's isError result into a Go error. Playwright MCP
-// reports navigation failures this way rather than as protocol errors.
-func toolError(res *mcpgo.CallToolResult, tool string) error {
-	if res == nil {
-		return fmt.Errorf("%s: empty result", tool)
+func (c *Capture) run(ctx context.Context, args ...string) error {
+	if len(c.cfg.Command) == 0 {
+		return fmt.Errorf("agent-browser command is empty")
 	}
-	if !res.IsError {
-		return nil
+	cmdArgs := append([]string{}, c.cfg.Command[1:]...)
+	if c.cfg.Session != "" {
+		cmdArgs = append(cmdArgs, "--session", c.cfg.Session)
 	}
-	var b strings.Builder
-	for _, c := range res.Content {
-		if text, ok := c.(*mcpgo.TextContent); ok {
-			b.WriteString(text.Text)
+	cmdArgs = append(cmdArgs, args...)
+	cmd := exec.CommandContext(ctx, c.cfg.Command[0], cmdArgs...)
+	if c.cfg.ExecutablePath != "" {
+		cmd.Env = append(cmd.Environ(), "AGENT_BROWSER_EXECUTABLE_PATH="+c.cfg.ExecutablePath)
+	}
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		msg := strings.TrimSpace(out.String())
+		if msg != "" {
+			return fmt.Errorf("%w: %s", err, msg)
 		}
+		return err
 	}
-	if msg := strings.TrimSpace(b.String()); msg != "" {
-		return fmt.Errorf("%s: %s", tool, msg)
-	}
-	return fmt.Errorf("%s: tool reported an error", tool)
+	return nil
 }
 
 // validateWebsite keeps the scanner from pointing the browser at internal

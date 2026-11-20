@@ -32,8 +32,8 @@
 		<p class="px-2 py-1 text-[11px] text-error">{source.error}</p>
 		{#if source.error.includes('connection refused') || source.error.includes('dial tcp')}
 			<p class="px-2 pb-1 text-[11px] text-faint">
-				Arranca la app con <code>make serve</code> o <code>make run</code> (o solo
-				<code>make mcp-browser</code>).
+				Revisa que el servidor MCP esté disponible y la configuración de
+				<code>agent.mcp</code>.
 			</p>
 		{/if}
 	{:else}

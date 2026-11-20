@@ -212,41 +212,37 @@ always comes from an environment variable (`agent.model.api_key_env`).
 - `POST /api/agent/chat` — `{session_id?, message}` answered as a
   `text/event-stream` of JSON events
 
-#### Browser MCP: consultar webs y capturar pantallas
+#### Navegador y capturas web (agent-browser)
 
-`make mcp-browser` levanta [Playwright MCP](https://github.com/microsoft/playwright-mcp)
-en `http://127.0.0.1:8931/mcp` con el Chromium instalado en `/usr/bin/chromium`.
-Configúralo en `agent.mcp` (ver el YAML de ejemplo) y el chat gana
-`browser_navigate` + `browser_snapshot` para leer webs y
-`browser_take_screenshot` para guardar fotos. El prompt del agente le indica
-que guarde cada captura como `<artifacts_dir>/<establishment_id>.png`;
-`artifacts_dir` debe apuntar a la misma carpeta en la que escribe el sidecar
-(`app/artifacts` por defecto, ignorada por git).
+El navegador usa [agent-browser](https://github.com/vercel-labs/agent-browser) de
+Vercel (sin sidecar Chrome/Playwright). Requiere `agent-browser` en PATH o
+`npx -y agent-browser@latest`; con `screenshots.executable_path` o
+`agent.mcp[].env.AGENT_BROWSER_EXECUTABLE_PATH` puede apuntar a un Chromium del
+sistema (p. ej. `/usr/bin/chromium`).
 
-`agent.mcp[].tools` es un allowlist opcional de herramientas visibles para el
-modelo (y en `/api/agent/tools`): vacío expone todas. La config local deja solo
-`browser_navigate`, `browser_navigate_back`, `browser_snapshot`,
-`browser_wait_for` y `browser_take_screenshot`, para que el agente no cargue
-esquemas de clics, JavaScript, cookies, grabaciones ni tests. La captura
-automática usa su propio cliente MCP y no depende de esta lista.
-
-Cuando el modelo completa `browser_take_screenshot`, el stream emite un evento
-`{"type":"image","image_url":"..."}` y el chat pega la foto **en línea**, justo
-debajo de la respuesta (clicable para abrirla a tamaño completo). El evento solo
-se envía si el PNG existe, así que una captura fallida no deja una imagen rota.
+**Capturas automáticas.** Con `screenshots.enabled: true` (default), **cada
+sync** —el botón de re-escaneo y el ciclo programado— captura la web conocida (o
+la descubierta en Google Maps) con la CLI de `agent-browser` y sobrescribe
+`<artifacts_dir>/<id>.png`. `screenshots.min_interval` permite espaciar las
+recapturas (`0s` = siempre) y `screenshots.session`/`command`/`executable_path`
+ajustan la ejecución.
 
 La imagen se sirve en `GET /api/establishments/{id}/screenshot` y aparece en la
 sección «Website» de `/detalle?id=<id>`, junto a la URL clickable y la fecha del
 fichero. Un `HEAD` a esa ruta comprueba si existe; no hay signals ni cambios en
 la BD.
 
-Con `screenshots.enabled: true` (default), **cada sync** —el botón de
-re-escaneo y el ciclo programado— captura la web conocida (o la descubierta en
-Google Maps) y sobrescribe `<artifacts_dir>/<id>.png`. `screenshots.min_interval`
-permite espaciar las recapturas (`0s` = siempre). `make run` y `make serve`
-arrancan el sidecar (y esperan a que responda) si no está ya escuchando, y lo
-apagan al salir. Los targets aceptan
-`MCP_BROWSER_PORT`, `ARTIFACTS_DIR` y `CHROME` como variables de entorno.
+**Navegador del chat.** Configurado como MCP stdio en `agent.mcp` (ver el YAML
+de ejemplo), `agent-browser mcp` expone herramientas como `agent_browser_open`,
+`agent_browser_snapshot` y `agent_browser_screenshot`. El prompt del agente le
+indica guardar cada captura como `<artifacts_dir>/<establishment_id>.png` y, al
+completar `agent_browser_screenshot`, el stream emite un evento
+`{"type":"image","image_url":"..."}` para mostrar la foto **en línea** debajo de
+la respuesta (solo si el PNG existe).
+
+`agent.mcp[].tools` es un allowlist opcional de herramientas visibles para el
+modelo (y en `/api/agent/tools`): vacío expone todas. La captura automática del
+scan usa su propio flujo y no depende de esta lista.
 
 ### Web UI
 

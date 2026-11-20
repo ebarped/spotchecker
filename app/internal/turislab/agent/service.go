@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -520,11 +521,9 @@ func (s *Service) streamContent(w http.ResponseWriter, flusher http.Flusher, eve
 			}
 			s.log.Section("agent").Info("[%s] tool → %s %s", shortID(sessionID), part.FunctionCall.Name, compactArgs(args))
 			s.emit(w, flusher, sseEvent{Type: "tool_call", ID: part.FunctionCall.ID, Name: part.FunctionCall.Name, Args: args})
-			if part.FunctionCall.Name == "browser_take_screenshot" {
-				if filename, ok := args["filename"].(string); ok {
-					if id := screenshotID(filename); id != "" {
-						pendingScreenshots[part.FunctionCall.ID] = id
-					}
+			if filename, ok := screenshotArg(part.FunctionCall.Name, args); ok {
+				if id := screenshotID(filename); id != "" {
+					pendingScreenshots[part.FunctionCall.ID] = id
 				}
 			}
 			calls++
@@ -664,17 +663,43 @@ func mcpToolFilter(server MCPServer) tool.Predicate {
 	return tool.AllowedToolsPredicate(server.Tools)
 }
 
-// buildToolsets collects the MCP toolsets of this chat: every configured
-// external server, by URL. They connect lazily and must be closed when the
-// chat ends.
+// mcpTransport builds a fresh transport for one MCP server. Command servers
+// run as stdio subprocesses (a new process per connection); URL servers use
+// streamable HTTP.
+func mcpTransport(server MCPServer) (mcpgo.Transport, error) {
+	if len(server.Command) > 0 {
+		if strings.TrimSpace(server.Command[0]) == "" {
+			return nil, fmt.Errorf("mcp server %q: command is empty", server.Name)
+		}
+		cmd := exec.Command(server.Command[0], server.Command[1:]...)
+		if len(server.Env) > 0 {
+			env := os.Environ()
+			for k, v := range server.Env {
+				env = append(env, k+"="+v)
+			}
+			cmd.Env = env
+		}
+		return &mcpgo.CommandTransport{Command: cmd}, nil
+	}
+	if server.URL == "" {
+		return nil, fmt.Errorf("mcp server %q: set command or url", server.Name)
+	}
+	return &mcpgo.StreamableClientTransport{
+		Endpoint:   server.URL,
+		HTTPClient: &http.Client{Transport: newHeaderTransport(server.Headers)},
+	}, nil
+}
+
+// buildToolsets collects the MCP toolsets of this chat. They connect lazily
+// and must be closed when the chat ends.
 func (s *Service) buildToolsets(ctx context.Context) ([]tool.Toolset, []io.Closer, error) {
 	var toolsets []tool.Toolset
 	var closers []io.Closer
 
 	for _, server := range s.cfg.MCP {
-		transport := &mcpgo.StreamableClientTransport{
-			Endpoint:   server.URL,
-			HTTPClient: &http.Client{Transport: newHeaderTransport(server.Headers)},
+		transport, err := mcpTransport(server)
+		if err != nil {
+			return nil, nil, err
 		}
 		ts, err := mcptoolset.New(mcptoolset.Config{
 			Transport:  transport,
@@ -698,6 +723,7 @@ func (s *Service) instruction() string {
 Rules:
 - Ground every statement in tool output. Cite establishments by id, name and municipality.
 - The local tools (get_report_summary, list_establishments, get_establishment_detail) describe the current scan report: the priority queue, the score breakdown of one establishment and the summary of the whole scan.
+- list_establishments and get_establishment_detail include enriched scan data, not just the registry: website_url is the effective/discovered website used by the scan (it may be present even when the registry website is empty) and screenshot_url points to the saved website capture. Use this data before trying to find a website externally.
 - The evidence of an establishment (get_establishment_detail) is what justifies its place in the queue: read it before asserting why an establishment is closed or at risk.
 - Never invent data. If a tool fails, say so and move on. Answer in the language of the user's question.
 
@@ -719,9 +745,9 @@ Tool discipline:
 	if s.cfg.ArtifactsDir != "" {
 		fmt.Fprintf(&b, `
 
-Websites and screenshots — browser MCP tools:
-- To consult a website, call browser_navigate with its URL and then browser_snapshot to read its text.
-- When the user asks for a photo/screenshot of a website, call browser_take_screenshot with filename set to the absolute path %s/<establishment_id>.png, using the exact establishment id. Confirm the tool succeeded before saying the capture is saved.
+Websites and screenshots — browser MCP tools (agent-browser):
+- To consult a website, call agent_browser_open with its url, then agent_browser_snapshot to read its text.
+- When the user asks for a photo/screenshot of a website, call agent_browser_screenshot with path set to the absolute path %s/<establishment_id>.png, using the exact establishment id. Confirm the tool succeeded before saying the capture is saved.
 - A successful capture is shown automatically as an image right below your answer in this chat, and also in the establishment's detail screen. Never say you cannot display images, never ask the user to open another screen to see it, and never paste base64 or inline image data in the chat.`, s.cfg.ArtifactsDir)
 	}
 
@@ -740,9 +766,24 @@ Websites and screenshots — browser MCP tools:
 	return b.String()
 }
 
-// screenshotID extracts the establishment id from the filename the model
-// passes to browser_take_screenshot. Only our <artifacts_dir>/<id>.png
-// convention is recognised; anything else is ignored rather than served.
+// screenshotArg returns the output path of a browser screenshot tool call, if
+// any. agent-browser uses agent_browser_screenshot with a "path" argument;
+// Playwright MCP used browser_take_screenshot with "filename".
+func screenshotArg(name string, args map[string]any) (string, bool) {
+	switch name {
+	case "agent_browser_screenshot":
+		path, ok := args["path"].(string)
+		return path, ok && path != ""
+	case "browser_take_screenshot":
+		path, ok := args["filename"].(string)
+		return path, ok && path != ""
+	}
+	return "", false
+}
+
+// screenshotID extracts the establishment id from a screenshot path. Only our
+// <artifacts_dir>/<id>.png convention is recognised; anything else is ignored
+// rather than served.
 func screenshotID(filename string) string {
 	base := filepath.Base(filepath.Clean(filename))
 	if filepath.Ext(base) != ".png" {

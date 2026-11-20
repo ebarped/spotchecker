@@ -133,13 +133,14 @@ func main() {
 	}
 	if cfg.Screenshots.Enabled {
 		scanOpts = append(scanOpts, scan.WithScreenshoter(capture.New(capture.Config{
-			MCPURL:       cfg.Screenshots.MCPURL,
-			ArtifactsDir: cfg.ArtifactsDir,
-			Timeout:      time.Duration(cfg.Screenshots.TimeoutSeconds) * time.Second,
-			MinInterval:  cfg.Screenshots.MinInterval.Duration,
+			Command:        cfg.Screenshots.Command,
+			Session:        cfg.Screenshots.Session,
+			ExecutablePath: cfg.Screenshots.ExecutablePath,
+			ArtifactsDir:   cfg.ArtifactsDir,
+			Timeout:        time.Duration(cfg.Screenshots.TimeoutSeconds) * time.Second,
+			MinInterval:    cfg.Screenshots.MinInterval.Duration,
 		})))
-		log.Info("capture", "capturas automáticas en cada scan → %s (MCP %s)",
-			cfg.ArtifactsDir, cfg.Screenshots.MCPURL)
+		log.Info("capture", "capturas automáticas en cada scan → %s (agent-browser)", cfg.ArtifactsDir)
 	} else {
 		log.Info("capture", "capturas automáticas desactivadas")
 	}
@@ -397,6 +398,8 @@ func agentConfig(cfg config.AgentConfig, artifactsDir string) agent.Config {
 			Name:    server.Name,
 			URL:     server.URL,
 			Headers: server.Headers,
+			Command: server.Command,
+			Env:     server.Env,
 			Tools:   server.Tools,
 		})
 	}
